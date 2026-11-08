@@ -1,5 +1,10 @@
 # pixcli
 
+[![GitHub stars](https://img.shields.io/github/stars/luppichristian/pixcli)](https://github.com/luppichristian/pixcli/stargazers)
+[![License: MIT](https://img.shields.io/github/license/luppichristian/pixcli)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/downloads/)
+[![Windows](https://img.shields.io/badge/platform-Windows-0078D4)](#requirements)
+
 Create pixel art and animations locally from the command line. Generate an image from a prompt, edit an existing image, or turn an image into an animation. Once the models are downloaded, inference runs without an internet connection.
 
 ## Requirements
