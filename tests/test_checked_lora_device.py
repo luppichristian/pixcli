@@ -45,6 +45,47 @@ def test_cache_reuses_only_same_path_and_device(checked_node):
     assert all(call[1]['safe_load'] for call in calls)
 
 
+def test_mapped_cpu_pixel_adapter_uses_read_only_loader(checked_node, monkeypatch):
+    node, comfy, _ = checked_node
+    from pixcli import mapped_safetensors
+    calls = []
+    monkeypatch.setattr(mapped_safetensors, 'load_readonly_safetensors',
+                        lambda path: (calls.append(path) or {'pixel': 1}, {'format': 'pt'}))
+    comfy.utils.load_torch_file = lambda *args, **kwargs: pytest.fail('mapped adapter used ordinary loader')
+    path = 'wan2.2_animate_adapter_model.safetensors'
+    assert node._load(path, 'cpu', 'mmap') == {'pixel': 1}
+    assert node._load(path, 'cpu', 'mmap') == {'pixel': 1}
+    assert calls == [path]
+    with pytest.raises(ValueError, match='pinned'):
+        node._load('untrusted.safetensors', 'cpu', 'mmap')
+
+
+def test_mapped_distillation_validates_schema_and_preserves_metadata(checked_node, monkeypatch):
+    node, comfy, fake_torch = checked_node
+    from pixcli import mapped_safetensors
+    fake_torch.float32, fake_torch.int64 = object(), object()
+    entries = {}
+    for index in range(400):
+        prefix = f'diffusion_model.blocks.{index}.attention'
+        entries[prefix + '.lora_up.weight'] = SimpleNamespace(dtype=fake_torch.float32)
+        entries[prefix + '.lora_down.weight'] = SimpleNamespace(dtype=fake_torch.float32)
+        entries[prefix + '.alpha'] = SimpleNamespace(dtype=fake_torch.int64)
+    metadata = {'source': 'example'}
+    monkeypatch.setattr(mapped_safetensors, 'load_readonly_safetensors', lambda path: (entries, metadata))
+    comfy.sd = ModuleType('comfy.sd')
+    seen = []
+    comfy.sd.load_lora_for_models = lambda model, clip, weights, strength, strength_clip, lora_metadata: (
+        seen.append((model, weights, strength, lora_metadata)) or 'patched', None)
+    monkeypatch.setitem(sys.modules, 'comfy.sd', comfy.sd)
+    name = 'wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors'
+    model = object()
+    assert node.PixcliMappedDistillLoRA().load_lora_model_only(model, name, .5) == ('patched',)
+    assert seen == [(model, entries, .5, metadata)]
+    entries.pop(next(iter(entries)))
+    with pytest.raises(ValueError, match='keys'):
+        node._load_distill('wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors')
+
+
 def test_node_rejects_unavailable_cuda_and_device_mismatch(checked_node):
     node, comfy, torch = checked_node
     loader = node.PixcliCheckedPixelLoRA()

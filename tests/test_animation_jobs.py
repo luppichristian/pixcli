@@ -20,6 +20,31 @@ def test_job_exports_frames_and_metadata(tmp_path, monkeypatch):
         validate_animation_job(settings)
 
 
+def test_animation_applies_residency_limit_to_complete_job(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    source = tmp_path / 'source.png'
+    Image.new('RGB', (8, 8)).save(source)
+    settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path/'out',
+                                 frames=5, pixel_width=8, pixel_height=8, mp4=False, ram_budget_gib=8)
+    active = []
+    @contextmanager
+    def limit(value):
+        active.append(value)
+        try:
+            yield True
+        finally:
+            active.pop()
+    monkeypatch.setattr('pixcli.residency.resident_memory_limit', limit)
+    def infer(*args, **kwargs):
+        assert active == [8]
+        return [Image.new('RGB', (8, 8))] * 5, {}
+    monkeypatch.setattr('pixcli.animation.run_comfy', infer)
+    run_animation(settings, {})
+    assert not active
+    metadata = json.loads((settings.out/'metadata.json').read_text())
+    assert metadata['runtime']['command_residency_limit_applied'] is True
+
+
 def test_animation_rejects_invalid_frames_and_input_inside_output(tmp_path):
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8)).save(source)
@@ -137,7 +162,8 @@ def test_memory_budget_passes_to_backend_and_metadata(tmp_path, monkeypatch):
     Image.new('RGB', (8, 8)).save(source)
     settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path/'out', frames=5,
                                  pixel_width=8, pixel_height=8, mp4=False, max_private_gib=16,
-                                 min_free_commit_gib=3, min_free_physical_gib=4)
+                                 min_free_commit_gib=3, min_free_physical_gib=4,
+                                 ram_budget_gib=9, vram_budget_gib=6, timeout_seconds=5000)
     seen = {}
     def fake_infer(*args, **kwargs):
         seen.update(kwargs)
@@ -145,16 +171,57 @@ def test_memory_budget_passes_to_backend_and_metadata(tmp_path, monkeypatch):
     monkeypatch.setattr('pixcli.animation.run_comfy', fake_infer)
     run_animation(settings, {})
     recorded = json.loads((settings.out/'metadata.json').read_text())['settings']
-    for key, value in [('max_private_gib', 16), ('min_free_commit_gib', 3), ('min_free_physical_gib', 4)]:
+    for key, value in [('max_private_gib', 16), ('min_free_commit_gib', 3), ('min_free_physical_gib', 4),
+                       ('ram_budget_gib', 9), ('vram_budget_gib', 6), ('timeout_seconds', 5000)]:
         assert seen[key] == value
         assert recorded[key] == value
 
 @pytest.mark.parametrize('key,value', [
     ('max_private_gib', 0), ('max_private_gib', float('nan')),
     ('min_free_commit_gib', 0.5), ('min_free_physical_gib', float('inf')),
+    ('ram_budget_gib', 0), ('vram_budget_gib', float('nan')),
 ])
 def test_animation_rejects_invalid_memory_budgets(tmp_path, key, value):
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8)).save(source)
     with pytest.raises(ValueError, match='memory'):
         validate_animation_job(AnimationSettings(input_path=source, prompt='walk', out=tmp_path/'out', mp4=False, **{key: value}))
+
+
+@pytest.mark.parametrize('timeout', [0, -1, float('nan'), float('inf')])
+def test_animation_rejects_invalid_timeout(tmp_path, timeout):
+    source = tmp_path / 'source.png'
+    Image.new('RGB', (8, 8)).save(source)
+    with pytest.raises(ValueError, match='timeout'):
+        validate_animation_job(AnimationSettings(input_path=source, prompt='walk', out=tmp_path/'out', mp4=False, timeout_seconds=timeout))
+def test_animation_checks_free_commit_before_inference_even_without_ram_budget(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from PIL import Image
+    from pixcli import animation, comfy_backend
+    import psutil
+    source = tmp_path / 'source.png'
+    Image.new('RGB', (8, 8)).save(source)
+    settings = animation.AnimationSettings(input_path=source, prompt='walk', out=tmp_path / 'out', mp4=False)
+    monkeypatch.setattr(psutil, 'virtual_memory', lambda: SimpleNamespace(available=8 * 1024**3))
+    monkeypatch.setattr(comfy_backend, '_free_commit_bytes', lambda: 1024**3)
+    monkeypatch.setattr(animation, 'run_comfy', lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('inference started')))
+    with pytest.raises(MemoryError, match='commit memory'):
+        animation.run_animation(settings, {})
+
+
+def test_animation_checks_free_commit_during_export_without_ram_budget(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from PIL import Image
+    from pixcli import animation, comfy_backend
+    import psutil
+    source = tmp_path / 'source.png'
+    Image.new('RGB', (8, 8)).save(source)
+    settings = animation.AnimationSettings(input_path=source, prompt='walk', out=tmp_path / 'out',
+                                           pixel_width=8, pixel_height=8, mp4=False)
+    monkeypatch.setattr(psutil, 'virtual_memory', lambda: SimpleNamespace(available=8 * 1024**3))
+    values = iter([8 * 1024**3, 8 * 1024**3, 1024**3])
+    monkeypatch.setattr(comfy_backend, '_free_commit_bytes', lambda: next(values))
+    monkeypatch.setattr(animation, 'run_comfy', lambda *args, **kwargs: ([Image.new('RGB', (8, 8))] * 5, {}))
+    with pytest.raises(MemoryError, match='commit memory'):
+        animation.run_animation(settings, {})
+    assert not (settings.out / 'metadata.json').exists()

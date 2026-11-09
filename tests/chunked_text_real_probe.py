@@ -50,6 +50,17 @@ def main():
     assert actual.shape == (69, 4096)
     assert torch.isfinite(reference).all()
     assert torch.equal(actual, reference), f'max difference: {(actual-reference).abs().max()}'
+    tokens = torch.tensor([[0, 68, 4, 0], [40, 4, 12, 67]])
+    gathered = chunked.gather_dequantize_embedding(source, tokens, PackedTensor, decoder.dequantize_tensor, dtype=torch.float32)
+    assert torch.equal(gathered, reference[tokens].float())
+    print('CPU sparse lookup passed for real Q6_K rows, including repeated indices')
+    gguf_ops = importlib.import_module(package.__name__ + '.ops')
+    module = chunked.mapped_umt5_ops(gguf_ops.GGMLOps, PackedTensor, decoder.dequantize_tensor).Embedding(69, 4096)
+    module.load_state_dict({'weight': source})
+    module.to('meta')
+    assert module.weight.device.type == 'cpu'
+    assert torch.equal(module(tokens, out_dtype=torch.float32), reference[tokens].float())
+    print('Real GGUF mapped embedding module passed CPU forward and preserves CPU-mapped weight under device moves')
     print('CPU parity passed: 69 actual Q6_K embedding rows, 17 rows per chunk, bitwise equal to pinned decoder')
 
 

@@ -33,13 +33,17 @@ class AnimationSettings:
     pixel_height: int = 128
     preset: str = 'low-vram'
     backend: str = 'comfyui-gguf'
+    device: str = 'auto'
+    timeout_seconds: float | None = None
     text_encoder: str = 'q3'
     expert_quant: str = 'q2'
     adapter_device: str = 'cpu'
     weight_storage: str = 'mmap'
-    max_private_gib: float = 14.0
+    max_private_gib: float | None = None
     min_free_commit_gib: float = 2.0
     min_free_physical_gib: float = 2.0
+    ram_budget_gib: float | None = None
+    vram_budget_gib: float | None = None
     palette_colors: int | None = None
     palette_image: Path | None = None
     background: str = '#ffffff'
@@ -59,7 +63,12 @@ def _check_mp4_dependencies() -> None:
 
 def validate_animation_job(s: AnimationSettings) -> None:
     validate_animation(s.inference_width, s.inference_height, s.frames)
-    validate_memory_budget(s.max_private_gib, s.min_free_commit_gib, s.min_free_physical_gib)
+    validate_memory_budget(s.max_private_gib, s.min_free_commit_gib, s.min_free_physical_gib,
+                           s.ram_budget_gib, s.vram_budget_gib)
+    if s.timeout_seconds is not None and (not math.isfinite(s.timeout_seconds) or s.timeout_seconds <= 0):
+        raise ValueError('animation timeout must be a positive finite number of seconds')
+    if s.vram_budget_gib is not None and s.preset == 'gpu-resident':
+        raise ValueError('VRAM memory budget requires the low-vram preset')
     if not s.prompt.strip():
         raise ValueError('prompt cannot be empty')
     if not 0 <= s.seed <= 2**64 - 1:
@@ -68,6 +77,10 @@ def validate_animation_job(s: AnimationSettings) -> None:
         raise ValueError('This distilled workflow supports exactly 4 steps')
     if s.preset not in ('low-vram', 'gpu-resident') or s.backend != 'comfyui-gguf':
         raise ValueError('Use preset low-vram or gpu-resident with backend comfyui-gguf')
+    if s.device not in ('auto', 'cpu', 'cuda'):
+        raise ValueError('animation device must be auto, cpu or cuda')
+    if s.device == 'cpu' and (s.vram_budget_gib is not None or s.preset != 'low-vram' or s.adapter_device != 'cpu'):
+        raise ValueError('CPU animation requires low-vram preset, CPU adapter and no VRAM budget')
     if s.text_encoder not in ('fp8', 'q3'):
         raise ValueError('text encoder must be fp8 or q3')
     if s.expert_quant not in ('q2', 'q3'):
@@ -121,7 +134,26 @@ def validate_animation_job(s: AnimationSettings) -> None:
 
 
 def run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[str], None] | None = None) -> dict:
+    from .residency import resident_memory_limit
+    with resident_memory_limit(s.ram_budget_gib) as limit_applied:
+        return _run_animation(s, model_paths, progress, limit_applied)
+
+
+def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[str], None] | None,
+                   limit_applied: bool) -> dict:
     validate_animation_job(s)
+    from .comfy_backend import (_check_sampled_budgets, _process_tree_resident_bytes,
+                                _free_commit_bytes, memory_guard_violation)
+    import psutil
+    process = psutil.Process()
+    def guard():
+        if s.ram_budget_gib is not None:
+            _check_sampled_budgets(_process_tree_resident_bytes(process), None, s.ram_budget_gib, None)
+        violation = memory_guard_violation(0, psutil.virtual_memory().available, _free_commit_bytes(), None,
+                                            s.min_free_commit_gib, s.min_free_physical_gib)
+        if violation:
+            raise MemoryError(f'Animation stopped by memory guard ({violation}) during preparation or export')
+    guard()
     source = Path(s.input_path)
     sha = hashlib.sha256()
     with source.open('rb') as f:
@@ -134,7 +166,12 @@ def run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[s
                               text_encoder=s.text_encoder, expert_quant=s.expert_quant, preset=s.preset,
                               adapter_device=s.adapter_device, weight_storage=s.weight_storage, max_private_gib=s.max_private_gib,
                               min_free_commit_gib=s.min_free_commit_gib, min_free_physical_gib=s.min_free_physical_gib,
+                              ram_budget_gib=s.ram_budget_gib, vram_budget_gib=s.vram_budget_gib,
+                              device=s.device,
+                              timeout_seconds=s.timeout_seconds,
                               progress=progress)
+    audit['command_residency_limit_applied'] = limit_applied
+    guard()
     palette = None
     palette_sha256 = None
     if s.palette_image is not None:
@@ -148,7 +185,7 @@ def run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[s
         palette_sha256 = palette_hash.hexdigest()
     result = export_animation(frames, s.out, final_size=(s.pixel_width, s.pixel_height), fps=s.fps,
                               palette_colors=s.palette_colors, palette_image=palette, background=ImageColor.getrgb(s.background),
-                              overwrite=s.overwrite, mp4=s.mp4)
+                              overwrite=s.overwrite, mp4=s.mp4, memory_guard=guard)
     from .models import animation_profile, list_models
     profile = animation_profile(s.text_encoder, s.expert_quant)
     models = {key: {'repo_id': value['repo_id'], 'revision': value['revision'],

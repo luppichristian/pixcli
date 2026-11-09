@@ -147,11 +147,17 @@ def gen(
     pixel_width: int = typer.Option(128), pixel_height: int = typer.Option(128),
     preview_scale: int = typer.Option(1), palette_colors: Optional[int] = typer.Option(None),
     save_original: bool = typer.Option(False), overwrite: bool = typer.Option(False),
+    ram_budget_gib: Optional[float] = typer.Option(None, help='Sampled process resident RAM budget in GiB.'),
+    vram_budget_gib: Optional[float] = typer.Option(None, help='PyTorch CUDA allocator budget in GiB.'),
+    min_free_commit_gib: float = typer.Option(2.0, help='Minimum sampled free Windows commit in GiB (at least 1).'),
+    min_free_physical_gib: float = typer.Option(2.0, help='Minimum sampled available physical RAM in GiB (at least 1).'),
+    device: str = typer.Option('auto', help='Compute device: auto, cuda, or cpu.'),
+    weight_storage: str = typer.Option('auto', help='Image weights: auto, memory or disk-backed offload.'),
     cache_dir: Optional[Path] = typer.Option(None), offline: bool = typer.Option(False, help="Explicit offline mode (inference is always offline)."),
 ):
     """Generate an image from text, entirely offline."""
     from .image import ImageSettings
-    _run_image(ImageSettings(prompt=prompt, out=out, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, pixel_width=pixel_width, pixel_height=pixel_height, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite), cache_dir)
+    _run_image(ImageSettings(prompt=prompt, out=out, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, pixel_width=pixel_width, pixel_height=pixel_height, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device), cache_dir)
 
 
 @app.command()
@@ -164,11 +170,17 @@ def edit(
     background: str = typer.Option("#ffffff"), preview_scale: int = typer.Option(1),
     palette_colors: Optional[int] = typer.Option(None), save_original: bool = typer.Option(False),
     overwrite: bool = typer.Option(False), cache_dir: Optional[Path] = typer.Option(None),
+    ram_budget_gib: Optional[float] = typer.Option(None, help='Sampled process resident RAM budget in GiB.'),
+    vram_budget_gib: Optional[float] = typer.Option(None, help='PyTorch CUDA allocator budget in GiB.'),
+    min_free_commit_gib: float = typer.Option(2.0, help='Minimum sampled free Windows commit in GiB (at least 1).'),
+    min_free_physical_gib: float = typer.Option(2.0, help='Minimum sampled available physical RAM in GiB (at least 1).'),
+    device: str = typer.Option('auto', help='Compute device: auto, cuda, or cpu.'),
+    weight_storage: str = typer.Option('auto', help='Image weights: auto, memory or disk-backed offload.'),
     offline: bool = typer.Option(False, help="Explicit offline mode (inference is always offline)."),
 ):
     """Edit an image; white mask pixels are editable and black are preserved."""
     from .image import ImageSettings
-    _run_image(ImageSettings(prompt=prompt, out=out, input_path=input, mask_path=mask, strength=strength, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, background=background, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite), cache_dir)
+    _run_image(ImageSettings(prompt=prompt, out=out, input_path=input, mask_path=mask, strength=strength, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, background=background, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device), cache_dir)
 
 
 @app.command()
@@ -181,7 +193,11 @@ def animate(
     pixel_width: int = typer.Option(128), pixel_height: int = typer.Option(128),
     palette_colors: Optional[int] = typer.Option(None), palette_image: Optional[Path] = typer.Option(None), background: str = typer.Option("#ffffff"),
     mp4: bool = typer.Option(True), overwrite: bool = typer.Option(False),
-    max_private_gib: float = typer.Option(14.0, help='Sampled maximum backend process-tree private memory in GiB.'),
+    ram_budget_gib: Optional[float] = typer.Option(None, help='Command process-tree resident RAM budget in GiB.'),
+    vram_budget_gib: Optional[float] = typer.Option(None, help='Backend PyTorch CUDA allocator budget in GiB.'),
+    device: str = typer.Option('auto', help='Compute device: auto, cuda, or cpu.'),
+    max_private_gib: Optional[float] = typer.Option(None, help='Backend private-memory limit in GiB; defaults to 14 without a RAM budget.'),
+    timeout_seconds: Optional[float] = typer.Option(None, help='Optional overall animation timeout in seconds.'),
     min_free_commit_gib: float = typer.Option(2.0, help='Minimum sampled free Windows commit in GiB (at least 1).'),
     min_free_physical_gib: float = typer.Option(2.0, help='Minimum sampled available physical RAM in GiB (at least 1).'),
     cache_dir: Optional[Path] = typer.Option(None), offline: bool = typer.Option(False, help="Explicit offline mode (inference is always offline)."),
@@ -194,7 +210,7 @@ def animate(
                                      seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, preset=preset, backend=backend, text_encoder=text_encoder, expert_quant=expert_quant, adapter_device=adapter_device, weight_storage=weight_storage,
                                      inference_width=inference_width, inference_height=inference_height, frames=frames, fps=fps,
                                      pixel_width=pixel_width, pixel_height=pixel_height, palette_colors=palette_colors, palette_image=palette_image,
-                                     background=background, mp4=mp4, overwrite=overwrite, max_private_gib=max_private_gib,
+                                     background=background, mp4=mp4, overwrite=overwrite, max_private_gib=max_private_gib, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, device=device, timeout_seconds=timeout_seconds,
                                      min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib)
         validate_animation_job(settings)
         profile = models.animation_profile(text_encoder, expert_quant)

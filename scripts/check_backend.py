@@ -79,8 +79,11 @@ with tempfile.TemporaryDirectory(prefix='pixcli-startup-') as temp:
             required = {'UnetLoaderGGUF', 'PainterI2V', 'PixcliCheckedPixelLoRA'}
             if args.weight_storage == 'mmap':
                 required.add('PixcliMappedGGUFLoader')
+                required.add('PixcliMappedDistillLoRA')
             if args.text_encoder == 'q3':
-                required.add('CLIPLoaderGGUF')
+                required.add('PixcliMappedUMT5Loader' if args.weight_storage == 'mmap' else 'CLIPLoaderGGUF')
+            elif args.weight_storage == 'mmap':
+                required.add('PixcliMappedFP8UMT5Loader')
             missing = required - nodes.keys()
             if missing:
                 raise RuntimeError(f'Required nodes missing: {sorted(missing)}')

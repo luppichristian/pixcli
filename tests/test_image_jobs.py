@@ -135,7 +135,7 @@ def test_oom_releases_models_and_traceback_before_emptying_cuda_cache(tmp_path, 
         OutOfMemoryError=FakeOOM, empty_cache=lambda: released_at_empty_cache.append(all(ref() is None for ref in references)))
     monkeypatch.setitem(sys.modules, 'torch', types.SimpleNamespace(cuda=cuda, float16=object()))
     monkeypatch.setitem(sys.modules, 'diffusers', types.SimpleNamespace(AutoencoderKL=FakeVAE, StableDiffusionXLPipeline=FakePipeline, StableDiffusionXLImg2ImgPipeline=FakePipeline))
-    monkeypatch.setattr('pixcli.image._memory_preflight', lambda paths: {})
+    monkeypatch.setattr('pixcli.image._memory_preflight', lambda paths, **kwargs: {})
     with pytest.raises(RuntimeError, match='out of memory'):
         _infer(ImageSettings(prompt='x', out=tmp_path / 'out.png'), {'base': tmp_path, 'vae': tmp_path, 'lora': tmp_path}, None)
     assert released_at_empty_cache == [True]
@@ -166,6 +166,12 @@ def test_oom_advice_does_not_recommend_the_failed_canvas(tmp_path):
     assert '768x768' in message and 'seed=123' in message
     assert '--inference-width 512 --inference-height 512' in message
 
+def test_oom_advice_mentions_requested_vram_budget(tmp_path):
+    from pixcli.image import _oom_message
+    message = _oom_message(ImageSettings(prompt='x', out=tmp_path / 'x.png', vram_budget_gib=0.5))
+    assert '--vram-budget-gib' in message
+    assert '0.5' in message
+
 def test_image_process_peak_measurements_report_available_windows_fields(monkeypatch):
     import psutil
     from types import SimpleNamespace
@@ -192,3 +198,118 @@ def test_image_metadata_records_offline_execution(tmp_path, monkeypatch):
     monkeypatch.setattr('pixcli.image._infer', lambda *args: (Image.new('RGB', (8, 8), 'red'), {}))
     metadata = run_image(ImageSettings(prompt='x', out=out, pixel_width=4, pixel_height=4), {})
     assert metadata['offline'] is True
+
+@pytest.mark.parametrize('field,value', [('ram_budget_gib', 0), ('ram_budget_gib', float('nan')),
+                                        ('vram_budget_gib', -1), ('vram_budget_gib', float('inf'))])
+def test_image_rejects_invalid_memory_budgets(tmp_path, field, value):
+    settings = ImageSettings(prompt='x', out=tmp_path / 'out.png', **{field: value})
+    with pytest.raises(ValueError, match='budget'):
+        validate_image(settings)
+
+def test_image_memory_guard_stops_when_resident_budget_exceeded(monkeypatch):
+    from pixcli.image import _ImageMemoryGuard
+    monkeypatch.setattr('pixcli.image._memory_status', lambda: {'physical_available': 8 * 1024**3, 'commit_available': 8 * 1024**3})
+    monkeypatch.setattr('pixcli.image._resident_memory_bytes', lambda: 2 * 1024**3)
+    guard = _ImageMemoryGuard(ram_budget_gib=1)
+    with pytest.raises(MemoryError, match='RAM budget'):
+        guard.sample()
+
+def test_image_offload_uses_per_layer_streaming_for_a_budget():
+    from pixcli.image import _configure_image_offload
+    calls = []
+    class Pipeline:
+        def enable_model_cpu_offload(self): calls.append('model')
+        def enable_sequential_cpu_offload(self): calls.append('sequential')
+    assert _configure_image_offload(Pipeline(), None, None) == 'model_cpu_offload'
+    assert _configure_image_offload(Pipeline(), 4, None) == 'sequential_cpu_offload'
+    assert _configure_image_offload(Pipeline(), None, 4) == 'sequential_cpu_offload'
+    assert calls == ['model', 'sequential', 'sequential']
+
+def test_cuda_budget_fraction_preserves_a_stricter_existing_limit():
+    from types import SimpleNamespace
+    from pixcli.image import _set_cuda_budget
+    fractions = []
+    cuda = SimpleNamespace(get_device_properties=lambda device: SimpleNamespace(total_memory=16 * 1024**3),
+                           get_per_process_memory_fraction=lambda device: 0.5,
+                           set_per_process_memory_fraction=lambda fraction, device: fractions.append((fraction, device)))
+    assert _set_cuda_budget(cuda, 4) == 0.5
+    assert fractions == [(0.25, 0)]
+    fractions.clear()
+    assert _set_cuda_budget(cuda, 12) == 0.5
+    assert fractions == [(0.5, 0)]
+
+def test_image_rejects_unknown_weight_storage(tmp_path):
+    with pytest.raises(ValueError, match='weight storage'):
+        validate_image(ImageSettings(prompt='x', out=tmp_path / 'out.png', weight_storage='invalid'))
+
+def test_disk_offload_executes_real_layer_and_preserves_output(tmp_path):
+    import torch
+    from types import SimpleNamespace
+    from pixcli.image import _configure_image_offload
+    layer = torch.nn.Linear(3, 2).eval()
+    inputs = torch.tensor([[1., 2., 3.]])
+    expected = layer(inputs).detach()
+    pipe = SimpleNamespace(components={'unet': layer}, _exclude_from_cpu_offload=[])
+    mode = _configure_image_offload(pipe, None, None, 'disk', tmp_path, device='cpu')
+    assert mode == 'disk_offload'
+    assert next(layer.parameters()).device.type == 'meta'
+    assert torch.allclose(layer(inputs), expected)
+    assert (tmp_path / 'unet' / 'index.json').exists()
+
+def test_auto_image_storage_selects_disk_only_for_ram_budget(tmp_path):
+    from pixcli.image import _image_weight_storage
+    settings = ImageSettings(prompt='x', out=tmp_path / 'out.png')
+    assert _image_weight_storage(settings) == 'memory'
+    settings.ram_budget_gib = 8
+    assert _image_weight_storage(settings) == 'disk'
+    settings.weight_storage = 'memory'
+    assert _image_weight_storage(settings) == 'memory'
+
+def test_image_checks_resident_budget_after_final_decode(tmp_path, monkeypatch):
+    import contextlib
+    import sys
+    from types import SimpleNamespace
+    from pixcli.image import _infer
+    samples = []
+    class Guard:
+        minimum_physical = minimum_commit = None
+        def __init__(self, *args, **kwargs): pass
+        def sample(self):
+            samples.append('sample')
+            if len(samples) == 6:
+                raise MemoryError('Image RAM budget exceeded after decode')
+        def callback(self, *args): pass
+    class Pipeline:
+        scheduler = SimpleNamespace(config={})
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs): return cls()
+        def load_lora_weights(self, *args, **kwargs): pass
+        def set_adapters(self, *args, **kwargs): pass
+        def get_active_adapters(self): return ['pixel']
+        def enable_vae_slicing(self): pass
+        def enable_vae_tiling(self): pass
+        def enable_model_cpu_offload(self): pass
+        def __call__(self, **kwargs): return SimpleNamespace(images=[Image.new('RGB', (1, 1))])
+    class VAE:
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs): return cls()
+    class Generator:
+        def __init__(self, **kwargs): pass
+        def manual_seed(self, seed): return self
+    class FakeOOM(Exception): pass
+    cuda = SimpleNamespace(is_available=lambda: True, reset_peak_memory_stats=lambda: None,
+                           empty_cache=lambda: None, OutOfMemoryError=FakeOOM,
+                           max_memory_allocated=lambda: 0, max_memory_reserved=lambda: 0,
+                           get_device_name=lambda: 'test')
+    torch = SimpleNamespace(cuda=cuda, float16=object(), Generator=Generator,
+                            inference_mode=contextlib.nullcontext)
+    diffusers = SimpleNamespace(AutoencoderKL=VAE, StableDiffusionXLPipeline=Pipeline,
+                                StableDiffusionXLImg2ImgPipeline=Pipeline)
+    monkeypatch.setitem(sys.modules, 'torch', torch)
+    monkeypatch.setitem(sys.modules, 'diffusers', diffusers)
+    monkeypatch.setattr('pixcli.image._memory_preflight', lambda paths, **kwargs: {})
+    monkeypatch.setattr('pixcli.image._ImageMemoryGuard', Guard)
+    monkeypatch.setattr('pixcli.image._assert_lora_coverage', lambda *args: {})
+    with pytest.raises(RuntimeError, match='RAM budget exceeded after decode'):
+        _infer(ImageSettings(prompt='x', out=tmp_path / 'out.png'),
+               {'base': tmp_path, 'vae': tmp_path, 'lora': tmp_path}, None)

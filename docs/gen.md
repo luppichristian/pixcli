@@ -25,6 +25,11 @@ This creates `outputs/knight.png` and `outputs/knight.json`. Existing outputs ar
 | `--palette-colors INTEGER` | None | Reduce the final sprite to 2–256 colors. |
 | `--save-original` / `--no-save-original` | Off | Save or skip the inference-resolution image as `.original.png`. |
 | `--overwrite` / `--no-overwrite` | Off | Allow or prevent replacing existing output files. |
+| `--device TEXT` | `auto` | Choose `auto`, `cuda`, or `cpu`. Auto selects CUDA if available, otherwise CPU. |
+| `--ram-budget-gib FLOAT` | None | Set a positive process resident RAM budget in GiB; `auto` storage selects disk streaming. |
+| `--vram-budget-gib FLOAT` | None | Limit the PyTorch CUDA allocator to this positive GiB value and use layer-level offload. |
+| `--min-free-commit-gib FLOAT`, `--min-free-physical-gib FLOAT` | `2`, `2` | Minimum sampled free Windows commit and system RAM in GiB. Each must be at least 1. |
+| `--weight-storage TEXT` | `auto` | `auto` chooses disk streaming for a RAM budget or CPU execution, otherwise memory. Choose `disk` or `memory` explicitly to override it. |
 | `--cache-dir PATH` | Hugging Face cache | Load models from this cache directory; use the same location used for downloading. |
 | `--offline` / `--no-offline` | `--no-offline` | State offline intent explicitly; inference always uses local files. |
 | `--help` | — | Show command help and exit. |
@@ -45,4 +50,4 @@ Reduce the final sprite to 16 colors:
 pixcli gen --prompt "pixel art, a treasure chest" --out outputs/chest.png --palette-colors 16
 ```
 
-Image commands have no configurable RAM or VRAM budget. They check host-memory headroom and stop when sampled available physical or Windows commit memory falls below 2 GiB. Sampling cannot catch every short allocation spike. If GPU memory is exhausted, close other GPU applications or try smaller matching inference dimensions.
+Disk streaming constructs the model without loading its full weights, then reads tensors from the original checkpoint files as needed. It trades disk access and speed for lower memory use; keep model files unchanged while the job runs. On Windows, the RAM budget sets a process working-set maximum and the job also checks its sampled resident memory. The VRAM limit applies to PyTorch's allocator, not all GPU allocations or other applications, and cannot be used with CPU execution. Both commands stop if sampled available physical or Windows commit memory falls below its selected reserve; the default is 2 GiB for each. Model activations, operating-system memory and other processes still need headroom, and short spikes can exceed sampled limits.

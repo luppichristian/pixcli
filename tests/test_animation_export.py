@@ -22,6 +22,15 @@ def test_exports_consistent_frames_sheet_and_timing(tmp_path):
     assert result['sheet'] == str(out / 'sheet.png')
 
 
+def test_export_checks_memory_before_committing_output(tmp_path):
+    out = tmp_path / 'walk'
+    def stop():
+        raise MemoryError('test memory limit')
+    with pytest.raises(MemoryError, match='test memory limit'):
+        export_animation([Image.new('RGB', (8, 8))], out, final_size=(8, 8), fps=8, memory_guard=stop)
+    assert not out.exists()
+
+
 def test_refuses_existing_output_and_mismatched_frames(tmp_path):
     out = tmp_path / 'walk'
     out.mkdir()

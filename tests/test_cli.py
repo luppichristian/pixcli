@@ -3,6 +3,60 @@ from pixcli.cli import app
 
 runner = CliRunner()
 
+def test_image_cli_forwards_memory_budgets(tmp_path, monkeypatch):
+    from PIL import Image
+    from pixcli import cli
+    source = tmp_path / 'input.png'
+    Image.new('RGB', (8, 8)).save(source)
+    seen = []
+    monkeypatch.setattr(cli, '_run_image', lambda settings, cache: seen.append(settings))
+    for command, extra in [('gen', []), ('edit', ['--input', str(source)])]:
+        result = runner.invoke(app, [command, *extra, '--prompt', 'cat', '--out', str(tmp_path / 'out.png'),
+                                     '--ram-budget-gib', '8', '--vram-budget-gib', '4', '--weight-storage', 'disk',
+                                     '--min-free-commit-gib', '1.25', '--min-free-physical-gib', '1.5'])
+        assert result.exit_code == 0, result.output
+    assert [(s.ram_budget_gib, s.vram_budget_gib) for s in seen] == [(8, 4), (8, 4)]
+    assert [s.weight_storage for s in seen] == ['disk', 'disk']
+    assert [(s.min_free_commit_gib, s.min_free_physical_gib) for s in seen] == [(1.25, 1.5), (1.25, 1.5)]
+
+def test_image_cli_forwards_explicit_cpu_device(tmp_path, monkeypatch):
+    from PIL import Image
+    from pixcli import cli
+    source = tmp_path / 'input.png'
+    Image.new('RGB', (8, 8)).save(source)
+    seen = []
+    monkeypatch.setattr(cli, '_run_image', lambda settings, cache: seen.append(settings))
+    for command, extra in [('gen', []), ('edit', ['--input', str(source)])]:
+        result = runner.invoke(app, [command, *extra, '--prompt', 'cat', '--out', str(tmp_path / 'out.png'), '--device', 'cpu'])
+        assert result.exit_code == 0, result.output
+    assert [s.device for s in seen] == ['cpu', 'cpu']
+
+def test_animation_cli_forwards_explicit_cpu_device(tmp_path, monkeypatch):
+    from PIL import Image
+    from pixcli import animation, models
+    source = tmp_path / 'input.png'
+    Image.new('RGB', (8, 8)).save(source)
+    seen = []
+    monkeypatch.setattr(animation, 'run_animation', lambda settings, paths, progress: seen.append(settings) or {})
+    monkeypatch.setattr(models, 'list_models', lambda profile=None: {})
+    result = runner.invoke(app, ['animate', '--input', str(source), '--prompt', 'walk', '--out', str(tmp_path / 'out'), '--no-mp4', '--device', 'cpu', '--timeout-seconds', '7200'])
+    assert result.exit_code == 0, result.output
+    assert seen[0].device == 'cpu'
+    assert seen[0].timeout_seconds == 7200
+
+def test_animation_cli_forwards_resource_budgets(tmp_path, monkeypatch):
+    from PIL import Image
+    from pixcli import animation, models
+    source = tmp_path / 'input.png'
+    Image.new('RGB', (8, 8)).save(source)
+    seen = []
+    monkeypatch.setattr(animation, 'run_animation', lambda settings, paths, progress: seen.append(settings) or {})
+    monkeypatch.setattr(models, 'list_models', lambda profile=None: {})
+    result = runner.invoke(app, ['animate', '--input', str(source), '--prompt', 'walk', '--out', str(tmp_path/'out'),
+                                 '--no-mp4', '--ram-budget-gib', '10', '--vram-budget-gib', '5'])
+    assert result.exit_code == 0, result.output
+    assert (seen[0].ram_budget_gib, seen[0].vram_budget_gib) == (10, 5)
+
 def test_gen_rejects_invalid_size_before_loading_models(tmp_path):
     result = runner.invoke(app, ['gen', '--prompt', 'cat', '--out', str(tmp_path / 'cat.png'), '--inference-width', '127'])
     assert result.exit_code != 0
@@ -88,7 +142,7 @@ def test_animation_cli_defaults_match_verified_profile(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     settings = seen['settings']
     assert (settings.text_encoder, settings.expert_quant, settings.weight_storage) == ('q3', 'q2', 'mmap')
-    assert (settings.inference_width, settings.inference_height, settings.frames, settings.max_private_gib) == (256, 256, 5, 14)
+    assert (settings.inference_width, settings.inference_height, settings.frames, settings.max_private_gib) == (256, 256, 5, None)
     assert seen['profile'] == 'animation'
 
 def test_default_animation_profile_matches_verified_models():

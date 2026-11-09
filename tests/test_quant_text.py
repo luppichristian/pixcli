@@ -29,6 +29,12 @@ def test_graph_selects_explicit_q3_encoder_and_keeps_expert_routing():
     assert quant['low_sample'] == default['low_sample']
 
 
+def test_mapped_graph_streams_the_quantized_text_embedding():
+    graph = build_graph('source.png', 'walk', '', 42, 384, 384, 5, 1.0,
+                        text_encoder='q3', weight_storage='mmap')
+    assert graph['text']['class_type'] == 'PixcliMappedUMT5Loader'
+
+
 def test_invalid_text_encoder_is_rejected_before_model_loading(tmp_path):
     with pytest.raises(ValueError, match='text encoder'):
         build_graph('source.png', 'walk', '', 42, 384, 384, 5, 1.0, text_encoder='wrong')

@@ -22,4 +22,4 @@ pixcli doctor
 pixcli doctor --cache-dir D:\huggingface-cache
 ```
 
-If `cuda_available` is false, check your NVIDIA driver and installation. The cache path shown in the report is the one used for the check.
+If `cuda_available` is false and you intend to use an NVIDIA GPU, check your driver and installation. CPU execution is also available, although it can be much slower. The cache path shown in the report is the one used for the check.

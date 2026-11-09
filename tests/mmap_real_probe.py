@@ -7,6 +7,7 @@ import gc
 import hashlib
 import importlib
 import importlib.util
+import sys
 from pathlib import Path
 
 import gguf
@@ -50,10 +51,18 @@ patcher.__class__ = mapped.mmap_patcher_type(type(patcher), ModelPatcher)
 
 prefix = 'diffusion_model.blocks.0.cross_attn.k'
 all_adapters = []
+mapped_values = []
 for path, suffixes in ((distill, ('alpha', 'lora_up.weight', 'lora_down.weight')),
                        (pixel, ('lora_A.weight', 'lora_B.weight'))):
-    with safe_open(path, framework='pt', device='cpu') as f:
-        state = {prefix + '.' + suffix: f.get_tensor(prefix + '.' + suffix) for suffix in suffixes}
+    if '--mapped-adapters' in sys.argv:
+        from pixcli.mapped_safetensors import load_readonly_safetensors
+        tensors, _ = load_readonly_safetensors(path)
+        state = {prefix + '.' + suffix: tensors[prefix + '.' + suffix] for suffix in suffixes}
+        mapped_values.extend((value, value.clone()) for value in state.values())
+        del tensors
+    else:
+        with safe_open(path, framework='pt', device='cpu') as f:
+            state = {prefix + '.' + suffix: f.get_tensor(prefix + '.' + suffix) for suffix in suffixes}
     adapted = comfy.lora.load_lora(state, {prefix: 'layer.weight'})
     assert set(adapted) == {'layer.weight'}
     assert set(adapted['layer.weight'].loaded_keys) == set(state)
@@ -94,4 +103,5 @@ try:
     raise AssertionError('in-place patch should fail')
 except RuntimeError as exc:
     assert 'in-place' in str(exc)
+assert all(torch.equal(value, original) for value, original in mapped_values)
 print('Q2 mmap after GC, two real LoRA pairs, CUDA layer parity, clone/low-VRAM load and unchanged bytes: PASS')

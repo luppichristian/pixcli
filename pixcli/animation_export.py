@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
-from typing import Sequence
+from typing import Callable, Sequence
 
 from PIL import Image
 
@@ -44,6 +44,7 @@ def export_animation(
     background: tuple[int, int, int] = (255, 255, 255),
     overwrite: bool = False,
     mp4: bool = False,
+    memory_guard: Callable[[], None] | None = None,
 ) -> dict:
     """Export original and processed frames, GIF, sprite sheet and layout JSON.
 
@@ -52,6 +53,8 @@ def export_animation(
     Existing output directories are replaced only if created by this function.
     """
     output = Path(output_dir)
+    check = memory_guard or (lambda: None)
+    check()
     if not frames:
         raise ValueError("At least one animation frame is required")
     if any(frame.size != frames[0].size for frame in frames):
@@ -81,6 +84,7 @@ def export_animation(
         originals = [_rgb(frame, background) for frame in frames]
         for i, frame in enumerate(frames):
             frame.save(stage / "original_frames" / f"{i:06d}.png")
+            check()
         source_w, source_h = originals[0].size
         dest_w, dest_h = final_size
         scale = min(dest_w / source_w, dest_h / source_h)
@@ -92,11 +96,13 @@ def export_animation(
             canvas = Image.new("RGB", final_size, background)
             canvas.paste(frame.resize(scaled, Image.Resampling.NEAREST), offset)
             processed.append(canvas)
+            check()
         global_palette = _palette(processed, palette_colors or 256, palette_image)
         if palette_colors is not None:
             processed = [frame.quantize(palette=global_palette, dither=Image.Dither.NONE) for frame in processed]
         for i, frame in enumerate(processed):
             frame.save(stage / "frames" / f"{i:06d}.png")
+            check()
         sheet = Image.new("RGB", (dest_w * len(processed), dest_h))
         for i, frame in enumerate(processed):
             sheet.paste(frame.convert("RGB"), (i * dest_w, 0))
@@ -117,6 +123,8 @@ def export_animation(
                                     pixelformat=pixel_format) as writer:
                 for frame in processed:
                     writer.append_data(np.asarray(frame.convert("RGB")))
+                    check()
+        check()
         info = {
             "fps": fps,
             "gif_duration_ms": gif_duration_ms,
@@ -131,6 +139,7 @@ def export_animation(
             "palette_source": "image" if palette_image is not None else ("sequence" if palette_colors else None),
         }
         (stage / "sheet.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+        check()
         if output.exists():
             backup = Path(tempfile.mkdtemp(prefix=f".{output.name}-backup-", dir=output.parent))
             backup.rmdir()

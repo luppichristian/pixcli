@@ -9,7 +9,7 @@ Create pixel art and animations locally from the command line. Generate an image
 
 ## Requirements
 
-- 64-bit Windows and an NVIDIA GPU with a compatible driver. Image generation and a short animation have been tested on Windows 11 with an RTX 4070 SUPER (12 GB VRAM) and 32 GiB RAM. Other systems have not been verified.
+- 64-bit Windows. An NVIDIA GPU with a compatible driver accelerates inference; CPU execution can be much slower. Image generation, editing and a short animation have been tested on Windows 11 with an RTX 4070 SUPER (12 GB VRAM) and 32 GiB RAM, and on CPU. Other systems have not been verified.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/), [Git](https://git-scm.com/), and an internet connection for setup and model downloads.
 - About 24.12 GiB for the models (6.78 GiB for images and 17.34 GiB for animation); allow extra space for temporary downloads and software.
 
@@ -65,6 +65,14 @@ pixcli animate --input outputs/knight.png --prompt "the knight walks in place, f
 The output directory contains PNG frames, a sprite sheet, a GIF, an MP4, and metadata. Add `--no-mp4` to skip the MP4. Use `--frames`, `--fps`, `--pixel-width`, and `--pixel-height` to adjust the output.
 
 Animation is experimental and memory-intensive. The default produces five 128×128 frames at 8 fps. A test on the hardware above completed, but the requested walking motion was subtle. Longer or larger animations can require more memory, and looping playback does not guarantee a seamless loop. Transparent input is composited over a background; generated frames are opaque.
+
+## Memory budgets
+
+Each generation, edit, or animation command accepts `--ram-budget-gib` and `--vram-budget-gib`. On Windows, a RAM budget bounds working sets and allows file-backed weights to be paged in as needed; animation accounts for the command and its backend processes together. RAM checks are also sampled, so brief peaks can exceed a limit. The VRAM budget limits PyTorch's CUDA allocator; it does not include every GPU allocation. Image jobs stream tensors from their model files when a RAM budget is set, and animation uses mapped expert weights by default. Streaming can be slower, and inference still needs enough memory for its active tensors and operating-system overhead. See the command references for the budget scope and storage options.
+
+```powershell
+pixcli gen --prompt "pixel art, a knight" --out outputs/knight.png --ram-budget-gib 16 --vram-budget-gib 8
+```
 
 ## Commands
 

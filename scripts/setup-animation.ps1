@@ -39,11 +39,15 @@ $nodeDir = Join-Path $comfyDir 'custom_nodes/pixcli_wan'
 New-Item -ItemType Directory -Force -Path $nodeDir | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectDir 'pixcli/comfy_custom_nodes/pixcli_wan/__init__.py') -Destination (Join-Path $nodeDir '__init__.py') -Force
 Copy-Item -LiteralPath (Join-Path $projectDir 'pixcli/comfy_custom_nodes/pixcli_wan/mmap_loader.py') -Destination (Join-Path $nodeDir 'mmap_loader.py') -Force
+Copy-Item -LiteralPath (Join-Path $projectDir 'pixcli/comfy_custom_nodes/pixcli_wan/chunked_text.py') -Destination (Join-Path $nodeDir 'chunked_text.py') -Force
+Copy-Item -LiteralPath (Join-Path $projectDir 'pixcli/comfy_custom_nodes/pixcli_wan/fp8_text.py') -Destination (Join-Path $nodeDir 'fp8_text.py') -Force
 $ready = @{
     schema_version = 1
     lock_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $lockFile).Hash.ToLowerInvariant()
     node_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $nodeDir '__init__.py')).Hash.ToLowerInvariant()
     mmap_node_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $nodeDir 'mmap_loader.py')).Hash.ToLowerInvariant()
+    chunked_node_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $nodeDir 'chunked_text.py')).Hash.ToLowerInvariant()
+    fp8_node_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $nodeDir 'fp8_text.py')).Hash.ToLowerInvariant()
     commits = @{
         ComfyUI = '63e5bf594339f676b4b15e072529873e3448409e'
         'ComfyUI-GGUF' = '6ea2651e7df66d7585f6ffee804b20e92fb38b8a'
