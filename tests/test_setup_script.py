@@ -67,8 +67,8 @@ if ($env:PIXCLI_TEST_FAIL -eq 'backend') { throw 'simulated backend failure' }
 CALLS = [
     'uv sync --locked --python 3.11',
     'backend',
-    'pixcli models download --profile image',
-    'pixcli models download --profile animation',
+    'pixcli models download -profile image',
+    'pixcli models download -profile animation',
 ]
 
 

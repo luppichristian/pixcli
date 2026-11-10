@@ -18,7 +18,7 @@ def test_missing_model_is_actionable_and_offline(tmp_path, monkeypatch):
 
     monkeypatch.setattr(models, '_hub', lambda: OfflineHub)
     assert all(not item['ok'] and item['detail'] == 'missing' for item in models.verify('image', tmp_path))
-    with pytest.raises(models.ModelError, match='models download --profile image'):
+    with pytest.raises(models.ModelError, match='models download -profile image'):
         models.model_path('base', tmp_path)
 
 

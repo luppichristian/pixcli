@@ -51,6 +51,7 @@ class AnimationSettings:
     palette_image: Path | None = None
     background: str = '#ffffff'
     mp4: bool = True
+    save_json: bool = False
     overwrite: bool = False
     style: str | None = None
     style_prompt: str | None = None
@@ -63,7 +64,7 @@ def _check_mp4_dependencies() -> None:
         import numpy  # noqa: F401
         imageio_ffmpeg.get_ffmpeg_exe()
     except (ImportError, RuntimeError) as exc:
-        raise RuntimeError('MP4 export needs imageio[ffmpeg] and numpy; run setup.ps1 or specify --no-mp4.') from exc
+        raise RuntimeError('MP4 export needs imageio[ffmpeg] and numpy; run setup.ps1 or specify -no-mp4.') from exc
 
 
 def validate_animation_job(s: AnimationSettings) -> None:
@@ -115,7 +116,7 @@ def validate_animation_job(s: AnimationSettings) -> None:
     if s.palette_colors is not None and not 2 <= s.palette_colors <= 256:
         raise ValueError('palette colors must be between 2 and 256')
     if s.palette_image is not None and s.palette_colors is None:
-        raise ValueError('palette image requires --palette-colors')
+        raise ValueError('palette image requires -palette-colors')
     try:
         if len(ImageColor.getrgb(s.background)) != 3:
             raise ValueError()
@@ -140,7 +141,7 @@ def validate_animation_job(s: AnimationSettings) -> None:
         raise ValueError('output may not be a symbolic link')
     if out.exists():
         if not s.overwrite:
-            raise FileExistsError(f'Output already exists: {out}; use --overwrite')
+            raise FileExistsError(f'Output already exists: {out}; use -overwrite')
         if not out.is_dir() or not (out / '.pixcli-animation').is_file():
             raise FileExistsError(f'Refusing to replace a directory not created by pixcli: {out}')
 
@@ -198,7 +199,7 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
         palette_sha256 = palette_hash.hexdigest()
     result = export_animation(frames, s.out, final_size=(s.pixel_width, s.pixel_height), fps=s.fps,
                               palette_colors=s.palette_colors, palette_image=palette, fixed_palette=fixed_palette, background=ImageColor.getrgb(s.background),
-                              overwrite=s.overwrite, mp4=s.mp4, memory_guard=guard)
+                              overwrite=s.overwrite, mp4=s.mp4, save_json=s.save_json, memory_guard=guard)
     from .models import animation_profile, list_models
     profile = animation_profile(s.text_encoder, s.expert_quant)
     models = {key: {'repo_id': value['repo_id'], 'revision': value['revision'],
@@ -229,6 +230,7 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
                 'inference_dimensions': [s.inference_width, s.inference_height], 'final_dimensions': [s.pixel_width, s.pixel_height],
                 'processing': ['aspect-preserving nearest-neighbor fit and letterbox', 'shared sequence transform and GIF palette', 'playback loop only'],
                 'elapsed_seconds': round(time.perf_counter() - started, 3), 'fallbacks': []}
-    from .image import _write_atomic
-    _write_atomic(Path(s.out) / 'metadata.json', (json.dumps(metadata, indent=2) + '\n').encode('utf-8'))
+    if s.save_json:
+        from .image import _write_atomic
+        _write_atomic(Path(s.out) / 'metadata.json', (json.dumps(metadata, indent=2) + '\n').encode('utf-8'))
     return result

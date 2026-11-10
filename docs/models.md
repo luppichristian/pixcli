@@ -12,7 +12,7 @@ pixcli models [OPTIONS] COMMAND [ARGS]
 | [`models download`](models-download.md) | Download and verify the files for a profile. |
 | [`models verify`](models-verify.md) | Check cached files without network access. |
 
-The group option `--help` displays the available commands and exits. Each command also accepts `--help`.
+The group option `-help` displays the available commands and exits. Each command also accepts `-help`.
 
 ## Profiles
 
@@ -29,13 +29,13 @@ If you change the animation text encoder or expert quantization, download the ma
 
 ## Cache
 
-By default, pixcli uses the Hugging Face cache, normally `C:\Users\<your-name>\.cache\huggingface\hub` on Windows. Set `HF_HUB_CACHE` before setup to use a different location, or pass `--cache-dir PATH` to `download`, `verify`, `doctor`, and inference commands. Use the same location consistently.
+By default, pixcli uses the Hugging Face cache, normally `C:\Users\<your-name>\.cache\huggingface\hub` on Windows. Set `HF_HUB_CACHE` before setup to use a different location, or pass `-cache-dir PATH` to `download`, `verify`, `doctor`, and inference commands. Use the same location consistently.
 
 ## Examples
 
 ```powershell
-pixcli models --help
+pixcli models -help
 pixcli models list
-pixcli models download --profile animation
-pixcli models verify --profile animation
+pixcli models download -profile animation
+pixcli models verify -profile animation
 ```

@@ -23,9 +23,9 @@ if (-not (Test-Path -LiteralPath $cli)) { throw 'Run .\setup.ps1 first.' }
 if (-not (Test-Path -LiteralPath $InputImage)) { throw "Input image not found: $InputImage" }
 if (Test-Path -LiteralPath $OutputDirectory) { throw "Output directory already exists: $OutputDirectory. Choose a new -OutputDirectory." }
 $profile = if ($ExpertQuant -eq 'q2' -and $TextEncoder -eq 'q3') { 'animation' } elseif ($ExpertQuant -eq 'q2') { 'animation-q2-experts' } elseif ($TextEncoder -eq 'q3') { 'animation-q3-text' } else { 'animation-q3-fp8' }
-& $cli models verify --profile $profile
+& $cli models verify -profile $profile
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $cli animate --input $InputImage --prompt 'the knight walks in place, fixed camera' --out $OutputDirectory --seed 42 --preset $Preset --text-encoder $TextEncoder --expert-quant $ExpertQuant --adapter-device $AdapterDevice --weight-storage $WeightStorage --max-private-gib $MaxPrivateGiB --min-free-commit-gib $MinFreeCommitGiB --min-free-physical-gib $MinFreePhysicalGiB --inference-width 256 --inference-height 256 --frames 5 --fps 8 --pixel-width 96 --pixel-height 96 --offline
+& $cli animate -input $InputImage -prompt 'the knight walks in place, fixed camera' -out $OutputDirectory -seed 42 -preset $Preset -text-encoder $TextEncoder -expert-quant $ExpertQuant -adapter-device $AdapterDevice -weight-storage $WeightStorage -max-private-gib $MaxPrivateGiB -min-free-commit-gib $MinFreeCommitGiB -min-free-physical-gib $MinFreePhysicalGiB -inference-width 256 -inference-height 256 -frames 5 -fps 8 -pixel-width 96 -pixel-height 96 -offline -json
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $python scripts/verify_animation.py $OutputDirectory
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

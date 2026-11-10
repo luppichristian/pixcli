@@ -20,10 +20,10 @@ def test_style_option_loads_prompt_for_each_command(tmp_path, monkeypatch, comma
     monkeypatch.setattr(cli, '_run_image', lambda settings, cache: seen.append(settings))
     monkeypatch.setattr(animation, 'run_animation', lambda settings, paths, progress: seen.append(settings) or {})
     monkeypatch.setattr(models, 'list_models', lambda profile=None: {})
-    extra = [] if command == 'gen' else ['--input', str(source)]
+    extra = [] if command == 'gen' else ['-input', str(source)]
     if command == 'animate':
-        extra += ['--no-mp4']
-    result = CliRunner().invoke(app, [command, *extra, '--prompt', 'a knight', '--out', str(tmp_path / ('out' if command == 'animate' else 'out.png')), '--style', 'retro'])
+        extra += ['-no-mp4']
+    result = CliRunner().invoke(app, [command, *extra, '-prompt', 'a knight', '-out', str(tmp_path / ('out' if command == 'animate' else 'out.png')), '-style', 'retro'])
     assert result.exit_code == 0, result.output
     assert seen[0].prompt == 'a knight'
     assert seen[0].style == 'retro'
@@ -35,7 +35,7 @@ def test_style_rejects_missing_invalid_or_empty_files_before_model_loading(tmp_p
     monkeypatch.chdir(tmp_path)
     (tmp_path / 'styles').mkdir()
     (tmp_path / 'styles' / 'empty.txt').write_text(' \n', encoding='utf-8')
-    result = CliRunner().invoke(app, ['gen', '--prompt', 'cat', '--out', str(tmp_path / 'out.png'), '--style', name])
+    result = CliRunner().invoke(app, ['gen', '-prompt', 'cat', '-out', str(tmp_path / 'out.png'), '-style', name])
     assert result.exit_code != 0
     assert 'style' in result.output.lower()
 
@@ -50,7 +50,7 @@ def test_animation_style_reaches_backend_and_is_recorded(tmp_path, monkeypatch):
         return [Image.new('RGB', (8, 8))] * 5, {}
     monkeypatch.setattr('pixcli.animation.run_comfy', infer)
     settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path / 'out',
-                                 style='retro', style_prompt='sharp outlines', mp4=False)
+                                 style='retro', style_prompt='sharp outlines', mp4=False, save_json=True)
     run_animation(settings, {})
     metadata = json.loads((settings.out / 'metadata.json').read_text(encoding='utf-8'))
     assert seen == ['walk, sharp outlines']
@@ -122,13 +122,13 @@ def test_style_palette_selection_and_explicit_override(tmp_path, monkeypatch, co
     monkeypatch.setattr(cli, '_run_image', lambda settings, cache: seen.append(settings))
     monkeypatch.setattr(animation, 'run_animation', lambda settings, paths, progress: seen.append(settings) or {})
     monkeypatch.setattr(models, 'list_models', lambda profile=None: {})
-    extra = [] if command == 'gen' else ['--input', str(source)]
+    extra = [] if command == 'gen' else ['-input', str(source)]
     if command == 'animate':
-        extra += ['--no-mp4']
+        extra += ['-no-mp4']
     if override:
-        extra += ['--palette', 'custom']
+        extra += ['-palette', 'custom']
     out = tmp_path / ('out' if command == 'animate' else 'out.png')
-    result = CliRunner().invoke(app, [command, *extra, '--prompt', 'a knight', '--out', str(out), '--style', 'retro'])
+    result = CliRunner().invoke(app, [command, *extra, '-prompt', 'a knight', '-out', str(out), '-style', 'retro'])
     assert result.exit_code == 0, result.output
     assert seen[0].style_prompt == 'sharp outlines\nmuted shading'
     assert seen[0].palette == ('custom' if override else 'soft.hex')
@@ -139,7 +139,7 @@ def test_style_rejects_empty_palette_reference_or_prompt(tmp_path, monkeypatch, 
     monkeypatch.chdir(tmp_path)
     (tmp_path / 'styles').mkdir()
     (tmp_path / 'styles' / 'bad.txt').write_text(content, encoding='utf-8')
-    result = CliRunner().invoke(app, ['gen', '--prompt', 'x', '--out', 'out.png', '--style', 'bad'])
+    result = CliRunner().invoke(app, ['gen', '-prompt', 'x', '-out', 'out.png', '-style', 'bad'])
     assert result.exit_code != 0
     assert 'style' in result.output.lower()
 
@@ -152,10 +152,10 @@ def test_missing_style_palette_fails_before_models(tmp_path, monkeypatch, comman
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8)).save(source)
     monkeypatch.setattr(models, 'model_path', lambda *a, **k: pytest.fail('model lookup should not occur'))
-    extra = [] if command == 'gen' else ['--input', str(source)]
+    extra = [] if command == 'gen' else ['-input', str(source)]
     if command == 'animate':
-        extra += ['--no-mp4']
-    result = CliRunner().invoke(app, [command, *extra, '--prompt', 'x', '--out', str(tmp_path / ('out' if command == 'animate' else 'out.png')), '--style', 'retro'])
+        extra += ['-no-mp4']
+    result = CliRunner().invoke(app, [command, *extra, '-prompt', 'x', '-out', str(tmp_path / ('out' if command == 'animate' else 'out.png')), '-style', 'retro'])
     assert result.exit_code != 0
     assert 'palette not found' in result.output.lower()
 
@@ -169,7 +169,7 @@ def test_explicit_palette_override_does_not_require_style_default(tmp_path, monk
     (tmp_path / 'palettes' / 'valid.hex').write_text('000000\nffffff\n')
     seen = []
     monkeypatch.setattr(cli, '_run_image', lambda settings, cache: seen.append(settings))
-    result = CliRunner().invoke(app, ['gen', '--prompt', 'x', '--out', 'out.png', '--style', 'retro', '--palette', 'valid'])
+    result = CliRunner().invoke(app, ['gen', '-prompt', 'x', '-out', 'out.png', '-style', 'retro', '-palette', 'valid'])
     assert result.exit_code == 0, result.output
     assert seen[0].palette == 'valid'
     assert seen[0].style_prompt == 'sharp outlines'
@@ -180,12 +180,12 @@ def test_style_rejects_malformed_palette_name(tmp_path, monkeypatch, reference):
     monkeypatch.chdir(tmp_path)
     (tmp_path / 'styles').mkdir()
     (tmp_path / 'styles' / 'bad.txt').write_text(f'palette: {reference}\nsharp outlines\n', encoding='utf-8')
-    result = CliRunner().invoke(app, ['gen', '--prompt', 'x', '--out', 'out.png', '--style', 'bad'])
+    result = CliRunner().invoke(app, ['gen', '-prompt', 'x', '-out', 'out.png', '-style', 'bad'])
     assert result.exit_code != 0
     assert 'invalid palette name' in result.output.lower()
 
 
-@pytest.mark.parametrize('command,conflict', [('gen', ['--palette-colors', '2']), ('animate', ['--palette-colors', '2']), ('animate', ['--palette-image', 'other.png'])])
+@pytest.mark.parametrize('command,conflict', [('gen', ['-palette-colors', '2']), ('animate', ['-palette-colors', '2']), ('animate', ['-palette-image', 'other.png'])])
 def test_style_palette_conflicts_with_other_palette_controls(tmp_path, monkeypatch, command, conflict):
     from pixcli import models
     monkeypatch.chdir(tmp_path)
@@ -196,8 +196,8 @@ def test_style_palette_conflicts_with_other_palette_controls(tmp_path, monkeypat
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8)).save(source)
     monkeypatch.setattr(models, 'model_path', lambda *a, **k: pytest.fail('model lookup should not occur'))
-    extra = [] if command == 'gen' else ['--input', str(source), '--no-mp4']
-    result = CliRunner().invoke(app, [command, *extra, *conflict, '--prompt', 'x', '--out', str(tmp_path / ('out' if command == 'animate' else 'out.png')), '--style', 'retro'])
+    extra = [] if command == 'gen' else ['-input', str(source), '-no-mp4']
+    result = CliRunner().invoke(app, [command, *extra, *conflict, '-prompt', 'x', '-out', str(tmp_path / ('out' if command == 'animate' else 'out.png')), '-style', 'retro'])
     assert result.exit_code != 0
     assert 'palette' in result.output.lower()
 
@@ -215,7 +215,7 @@ def test_style_palette_applies_to_generated_image_and_is_recorded(tmp_path, monk
         return Image.new('RGB', (8, 8), (240, 10, 10)), {}
     monkeypatch.setattr('pixcli.image._infer', infer)
     monkeypatch.setattr(models, 'model_path', lambda *args, **kwargs: tmp_path)
-    result = CliRunner().invoke(app, ['gen', '--prompt', 'x', '--out', 'sprite.png', '--style', 'retro'])
+    result = CliRunner().invoke(app, ['gen', '-prompt', 'x', '-out', 'sprite.png', '-style', 'retro', '-json'])
     assert result.exit_code == 0, result.output
     assert seen == ['sharp outlines']
     assert Image.open('sprite.png').convert('RGB').getpixel((0, 0)) == (255, 0, 0)

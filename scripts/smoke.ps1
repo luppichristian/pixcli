@@ -14,13 +14,13 @@ $masked = Join-Path $OutputDirectory 'masked.png'
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $cli models verify
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $cli gen --prompt 'pixel art, a knight with blue armor, centered, plain background' --out $source --seed 42 --steps 8 --inference-width 768 --inference-height 768 --pixel-width 96 --pixel-height 96 --save-original --offline
+& $cli gen -prompt 'pixel art, a knight with blue armor, centered, plain background' -out $source -seed 42 -steps 8 -inference-width 768 -inference-height 768 -pixel-width 96 -pixel-height 96 -save-original -offline
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $cli edit --input $source --prompt 'pixel art, the same knight with red armor' --strength 0.5 --out $edit --seed 42 --steps 8 --inference-width 768 --inference-height 768 --offline
+& $cli edit -input $source -prompt 'pixel art, the same knight with red armor' -strength 0.5 -out $edit -seed 42 -steps 8 -inference-width 768 -inference-height 768 -offline
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $python scripts/smoke_mask.py mask $source $mask
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $cli edit --input $source --mask $mask --prompt 'pixel art, red armor' --strength 0.5 --out $masked --seed 42 --steps 8 --inference-width 768 --inference-height 768 --offline
+& $cli edit -input $source -mask $mask -prompt 'pixel art, red armor' -strength 0.5 -out $masked -seed 42 -steps 8 -inference-width 768 -inference-height 768 -offline
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $python scripts/smoke_mask.py verify $source $mask $masked
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

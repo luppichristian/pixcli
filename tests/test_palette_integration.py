@@ -40,7 +40,7 @@ def test_animation_fixed_palette_applies_to_frames_and_sheet(palette_dir, monkey
     source = palette_dir / 'source.png'
     Image.new('RGB', (2, 2)).save(source)
     monkeypatch.setattr('pixcli.animation.run_comfy', lambda *a, **k: ([Image.new('RGB', (2, 2), (240, 10, 10))] * 5, {}))
-    settings = AnimationSettings(input_path=source, prompt='walk', out=palette_dir / 'anim', pixel_width=2, pixel_height=2, mp4=False, palette='two')
+    settings = AnimationSettings(input_path=source, prompt='walk', out=palette_dir / 'anim', pixel_width=2, pixel_height=2, mp4=False, palette='two', save_json=True)
     run_animation(settings, {})
     assert Image.open(settings.out / 'frames/000000.png').convert('RGB').getpixel((0, 0)) == (255, 0, 0)
     assert Image.open(settings.out / 'sheet.png').getpixel((0, 0)) == (255, 0, 0)
@@ -68,11 +68,11 @@ def test_cli_passes_palette_option(palette_dir, monkeypatch, command):
     monkeypatch.setattr(models, 'list_models', lambda profile=None: {})
     source = palette_dir / 'source.png'
     Image.new('RGB', (2, 2)).save(source)
-    extra = [] if command == 'gen' else ['--input', str(source)]
+    extra = [] if command == 'gen' else ['-input', str(source)]
     if command == 'animate':
-        extra += ['--no-mp4']
+        extra += ['-no-mp4']
     output = palette_dir / ('out' if command == 'animate' else 'out.png')
-    result = CliRunner().invoke(app, [command, *extra, '--prompt', 'x', '--out', str(output), '--palette', 'two'])
+    result = CliRunner().invoke(app, [command, *extra, '-prompt', 'x', '-out', str(output), '-palette', 'two'])
     assert result.exit_code == 0, result.output
     assert seen[0].palette == 'two'
 

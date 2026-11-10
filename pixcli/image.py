@@ -40,6 +40,7 @@ class ImageSettings:
     strength: float = 0.3
     background: str = '#ffffff'
     save_original: bool = False
+    save_json: bool = False
     preview_scale: int = 1
     palette_colors: int | None = None
     palette: str | None = None
@@ -106,7 +107,9 @@ def validate_image(s: ImageSettings) -> None:
     except ValueError as exc:
         raise ValueError('background must be an RGB color such as #ffffff') from exc
     out = Path(s.out)
-    targets = [out, out.with_suffix('.json')]
+    targets = [out]
+    if s.save_json:
+        targets.append(out.with_suffix('.json'))
     if s.save_original:
         targets.append(out.with_name(out.stem + '.original.png'))
     if s.preview_scale > 1:
@@ -115,9 +118,9 @@ def validate_image(s: ImageSettings) -> None:
         raise ValueError('output paths collide')
     for path in targets:
         if path.exists() and not s.overwrite:
-            raise FileExistsError(f'Output already exists: {path}. Use --overwrite to replace it.')
+            raise FileExistsError(f'Output already exists: {path}. Use -overwrite to replace it.')
         if not s.overwrite and any(path.resolve() == Path(p).resolve() for p in (s.input_path, s.mask_path) if p):
-            raise FileExistsError(f'Output would overwrite an input: {path}. Use --overwrite to replace it.')
+            raise FileExistsError(f'Output would overwrite an input: {path}. Use -overwrite to replace it.')
     if s.input_path:
         with Image.open(s.input_path) as source:
             source_size = source.size
@@ -305,11 +308,11 @@ def _set_cuda_budget(cuda: Any, budget_gib: float) -> float:
 
 def _oom_message(s: ImageSettings) -> str:
     if s.inference_width == s.inference_height and s.inference_width > 512:
-        advice = 'Try --inference-width 512 --inference-height 512 and close other GPU applications.'
+        advice = 'Try -inference-width 512 -inference-height 512 and close other GPU applications.'
     else:
         advice = 'Close other GPU applications; if possible, reduce the inference dimensions while keeping the required aspect ratio.'
     if s.vram_budget_gib is not None:
-        advice += f' The PyTorch allocator budget is {s.vram_budget_gib:g} GiB; increase --vram-budget-gib if sufficient VRAM is available.'
+        advice += f' The PyTorch allocator budget is {s.vram_budget_gib:g} GiB; increase -vram-budget-gib if sufficient VRAM is available.'
     return (f'CUDA out of memory at {s.inference_width}x{s.inference_height}, {s.steps} steps, '
             f'seed={s.seed}, guidance={s.guidance}, LoRA strength={s.lora_strength}, '
             f'edit strength={s.strength}. {advice} No settings were changed automatically.')
@@ -352,13 +355,13 @@ def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.
         raise RuntimeError('Image dependencies missing; run the project setup script.') from exc
     cuda_available = torch.cuda.is_available()
     if s.device == 'cuda' and not cuda_available:
-        raise RuntimeError('CUDA is unavailable. Choose --device cpu or check your NVIDIA driver.')
+        raise RuntimeError('CUDA is unavailable. Choose -device cpu or check your NVIDIA driver.')
     device = 'cuda' if s.device == 'cuda' or (s.device == 'auto' and cuda_available) else 'cpu'
     if device == 'cpu' and s.vram_budget_gib is not None:
         raise ValueError('VRAM budget requires a CUDA device')
     for key in ('base', 'vae', 'lora'):
         if key not in model_paths or not Path(model_paths[key]).exists():
-            raise RuntimeError(f'Missing local {key} model. Run pixcli models download --profile image.')
+            raise RuntimeError(f'Missing local {key} model. Run pixcli models download -profile image.')
     weight_storage = _image_weight_storage(s, device)
     memory = _memory_preflight(model_paths, streaming=weight_storage == 'disk',
                                min_free_commit_gib=s.min_free_commit_gib,
@@ -451,7 +454,7 @@ def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.
 
 
 def run_image(s: ImageSettings, model_paths: dict[str, Path]) -> dict[str, Any]:
-    """Write a PNG, JSON sidecar, and requested optional files. Returns metadata.
+    """Write a PNG and requested optional files. Returns metadata.
 
     Model paths must be local pinned base and VAE snapshot directories and the
     local adapter safetensors file, under keys ``base``, ``vae``, and ``lora``.
@@ -554,5 +557,6 @@ def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path]) -> dict[st
             runtime[key] = min(values) if values else None
         if s.ram_budget_gib is not None:
             runtime['peak_sampled_resident_bytes'] = max(job_guard.peak_resident, runtime.get('peak_sampled_resident_bytes') or 0)
-    _write_atomic(sidecar, (json.dumps(metadata, indent=2, ensure_ascii=False) + '\n').encode('utf-8'))
+    if s.save_json:
+        _write_atomic(sidecar, (json.dumps(metadata, indent=2, ensure_ascii=False) + '\n').encode('utf-8'))
     return metadata

@@ -23,10 +23,10 @@ def test_style_palette_affects_output_and_metadata(tmp_path, monkeypatch, comman
     monkeypatch.setattr('pixcli.image._infer', lambda s, paths, image: (Image.new('RGB', image.size if image else (8, 8), (240, 20, 10)), {}))
     monkeypatch.setattr('pixcli.animation.run_comfy', lambda *a, **k: ([Image.new('RGB', (2, 2), (240, 20, 10))] * 5, {}))
     output = tmp_path / ('out' if command == 'animate' else 'out.png')
-    extra = [] if command == 'gen' else ['--input', str(source)]
+    extra = [] if command == 'gen' else ['-input', str(source)]
     if command == 'animate':
-        extra += ['--no-mp4', '--pixel-width', '2', '--pixel-height', '2']
-    result = CliRunner().invoke(app, [command, *extra, '--prompt', 'a knight', '--out', str(output), '--style', 'retro'])
+        extra += ['-no-mp4', '-pixel-width', '2', '-pixel-height', '2']
+    result = CliRunner().invoke(app, [command, *extra, '-prompt', 'a knight', '-out', str(output), '-style', 'retro', '-json'])
     assert result.exit_code == 0, result.output
     image_path = output / 'frames/000000.png' if command == 'animate' else output
     meta_path = output / 'metadata.json' if command == 'animate' else output.with_suffix('.json')

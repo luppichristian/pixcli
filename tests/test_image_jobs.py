@@ -7,7 +7,7 @@ from pixcli.image import ImageSettings, run_image, validate_image
 
 def test_image_job_emits_metadata_and_refuses_existing_output(tmp_path, monkeypatch):
     output = tmp_path / 'sprite.png'
-    settings = ImageSettings(prompt='a knight', out=output, pixel_width=3, pixel_height=2, inference_width=768, inference_height=512)
+    settings = ImageSettings(prompt='a knight', out=output, pixel_width=3, pixel_height=2, inference_width=768, inference_height=512, save_json=True)
     monkeypatch.setattr('pixcli.image._infer', lambda *a: (Image.new('RGB', (768, 512), 'red'), {}))
     metadata = run_image(settings, {})
     assert Image.open(output).size == (3, 2)
@@ -56,7 +56,7 @@ def test_validation_checks_sidecar_collision_before_models(tmp_path):
     output = tmp_path / 'sprite.png'
     output.with_suffix('.json').write_text('old', encoding='utf-8')
     with pytest.raises(FileExistsError):
-        validate_image(ImageSettings(prompt='x', out=output))
+        validate_image(ImageSettings(prompt='x', out=output, save_json=True))
 
 def test_adapter_coverage_rejects_unapplied_layers(tmp_path):
     import struct
@@ -164,12 +164,12 @@ def test_oom_advice_does_not_recommend_the_failed_canvas(tmp_path):
     from pixcli.image import _oom_message
     message = _oom_message(ImageSettings(prompt='x', out=tmp_path / 'x.png', inference_width=768, inference_height=768, seed=123))
     assert '768x768' in message and 'seed=123' in message
-    assert '--inference-width 512 --inference-height 512' in message
+    assert '-inference-width 512 -inference-height 512' in message
 
 def test_oom_advice_mentions_requested_vram_budget(tmp_path):
     from pixcli.image import _oom_message
     message = _oom_message(ImageSettings(prompt='x', out=tmp_path / 'x.png', vram_budget_gib=0.5))
-    assert '--vram-budget-gib' in message
+    assert '-vram-budget-gib' in message
     assert '0.5' in message
 
 def test_image_process_peak_measurements_report_available_windows_fields(monkeypatch):

@@ -1,6 +1,6 @@
 # `pixcli doctor`
 
-Report system details and whether the required models and animation backend appear to be available locally. The JSON report includes the operating system, Python and package versions, GPU and CUDA availability, VRAM, system memory, free disk space, the model cache, and local model paths or errors.
+Report system details and whether the required models and animation backend appear to be available locally. The report includes the operating system, Python and package versions, GPU and CUDA availability, VRAM, system memory, free disk space, the model cache, and local model paths or errors.
 
 ```powershell
 pixcli doctor [OPTIONS]
@@ -12,14 +12,15 @@ The backend status is an installation check; it does not run inference or establ
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--cache-dir PATH` | Hugging Face cache | Check models and free disk space at a custom cache location. Use the same path when downloading and running jobs. |
-| `--help` | | Show command help and exit. |
+| `-cache-dir PATH` | Hugging Face cache | Check models and free disk space at a custom cache location. Use the same path when downloading and running jobs. |
+| `-json` | Off | Print the report as JSON. |
+| `-help` | | Show command help and exit. |
 
 ## Examples
 
 ```powershell
 pixcli doctor
-pixcli doctor --cache-dir D:\huggingface-cache
+pixcli doctor -cache-dir D:\huggingface-cache
 ```
 
 If `cuda_available` is false and you intend to use an NVIDIA GPU, check your driver and installation. CPU execution is also available, although it can be much slower. The cache path shown in the report is the one used for the check.

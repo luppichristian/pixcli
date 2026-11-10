@@ -8,7 +8,7 @@ from pixcli.animation import AnimationSettings, run_animation, validate_animatio
 def test_job_exports_frames_and_metadata(tmp_path, monkeypatch):
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8), 'red').save(source)
-    settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path / 'walk', frames=5, pixel_width=8, pixel_height=8, mp4=False)
+    settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path / 'walk', frames=5, pixel_width=8, pixel_height=8, mp4=False, save_json=True)
     monkeypatch.setattr('pixcli.animation.run_comfy', lambda *a, **kw: ([Image.new('RGB', (8, 8), 'red')] * 5, {'adapter_coverage': []}))
     result = run_animation(settings, {})
     metadata = json.loads((settings.out / 'metadata.json').read_text(encoding='utf-8'))
@@ -25,7 +25,7 @@ def test_animation_applies_residency_limit_to_complete_job(tmp_path, monkeypatch
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8)).save(source)
     settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path/'out',
-                                 frames=5, pixel_width=8, pixel_height=8, mp4=False, ram_budget_gib=8)
+                                 frames=5, pixel_width=8, pixel_height=8, mp4=False, ram_budget_gib=8, save_json=True)
     active = []
     @contextmanager
     def limit(value):
@@ -67,7 +67,7 @@ def test_animation_records_supplied_palette_hash(tmp_path, monkeypatch):
     Image.new('RGB', (8, 8), 'red').save(source)
     Image.new('RGB', (4, 4), 'blue').save(palette)
     settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path / 'out', frames=5,
-                                 pixel_width=8, pixel_height=8, palette_colors=4, palette_image=palette, mp4=False)
+                                 pixel_width=8, pixel_height=8, palette_colors=4, palette_image=palette, mp4=False, save_json=True)
     monkeypatch.setattr('pixcli.animation.run_comfy', lambda *a, **kw: ([Image.new('RGB', (8, 8), 'red')] * 5, {}))
     run_animation(settings, {})
     metadata = json.loads((settings.out / 'metadata.json').read_text(encoding='utf-8'))
@@ -89,7 +89,7 @@ def test_mp4_dependency_failure_occurs_before_inference(tmp_path, monkeypatch):
 def test_animation_metadata_records_effective_workflow(tmp_path, monkeypatch):
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8)).save(source)
-    settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path / 'out', frames=5, pixel_width=8, pixel_height=8, mp4=False)
+    settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path / 'out', frames=5, pixel_width=8, pixel_height=8, mp4=False, save_json=True)
     monkeypatch.setattr('pixcli.animation.run_comfy', lambda *a, **kw: ([Image.new('RGB', (8, 8), 'red')] * 5, {}))
     run_animation(settings, {})
     metadata = json.loads((settings.out / 'metadata.json').read_text(encoding='utf-8'))
@@ -104,7 +104,7 @@ def test_q3_text_encoder_is_explicitly_routed_and_recorded(tmp_path, monkeypatch
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8)).save(source)
     settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path/'out', frames=5,
-                                 pixel_width=8, pixel_height=8, mp4=False, text_encoder='q3', expert_quant='q3')
+                                 pixel_width=8, pixel_height=8, mp4=False, text_encoder='q3', expert_quant='q3', save_json=True)
     seen = {}
     def fake_infer(*args, **kwargs):
         seen['encoder'] = kwargs['text_encoder']
@@ -125,7 +125,7 @@ def test_q2_expert_selection_is_explicit_and_recorded(tmp_path, monkeypatch):
     source = tmp_path / 'source.png'
     Image.new('RGB', (8, 8)).save(source)
     settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path/'out', frames=5,
-                                 pixel_width=8, pixel_height=8, mp4=False, expert_quant='q2', text_encoder='fp8')
+                                 pixel_width=8, pixel_height=8, mp4=False, expert_quant='q2', text_encoder='fp8', save_json=True)
     seen = {}
     def fake_infer(*args, **kwargs):
         seen['expert_quant'] = kwargs['expert_quant']
@@ -163,7 +163,7 @@ def test_memory_budget_passes_to_backend_and_metadata(tmp_path, monkeypatch):
     settings = AnimationSettings(input_path=source, prompt='walk', out=tmp_path/'out', frames=5,
                                  pixel_width=8, pixel_height=8, mp4=False, max_private_gib=16,
                                  min_free_commit_gib=3, min_free_physical_gib=4,
-                                 ram_budget_gib=9, vram_budget_gib=6, timeout_seconds=5000)
+                                 ram_budget_gib=9, vram_budget_gib=6, timeout_seconds=5000, save_json=True)
     seen = {}
     def fake_infer(*args, **kwargs):
         seen.update(kwargs)

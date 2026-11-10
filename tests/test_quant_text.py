@@ -48,9 +48,9 @@ def test_missing_q3_model_names_explicit_profile(tmp_path, monkeypatch):
         def try_to_load_from_cache(*args, **kwargs):
             return None
     monkeypatch.setattr(models, '_hub', lambda: EmptyHub)
-    with pytest.raises(models.ModelError, match='models download --profile animation'):
+    with pytest.raises(models.ModelError, match='models download -profile animation'):
         models.model_path('wan_text_q3', tmp_path)
-    with pytest.raises(FileNotFoundError, match='models download --profile animation-q3-text'):
+    with pytest.raises(FileNotFoundError, match='models download -profile animation-q3-text'):
         run_comfy(tmp_path/'x.png', 'walk', '', 42, 384, 384, 5, 1.0, {}, text_encoder='q3')
 
 

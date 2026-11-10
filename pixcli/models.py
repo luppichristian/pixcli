@@ -126,7 +126,7 @@ def model_path(key: str, cache_dir: str | Path | None = None, *, profile: str | 
         path = _cached(model, item["filename"], cache_dir)
         if path is None or path.stat().st_size != item["size"]:
             selected_profile = profile or ("animation-q3-fp8" if key in ('wan_high', 'wan_low', 'wan_text') else ("animation" if key.startswith("wan_") else "image"))
-            raise ModelError(f"Missing or incomplete {key}: {item['filename']}. Run `pixcli models download --profile {selected_profile}`, then `pixcli models verify --profile {selected_profile}`.")
+            raise ModelError(f"Missing or incomplete {key}: {item['filename']}. Run `pixcli models download -profile {selected_profile}`, then `pixcli models verify -profile {selected_profile}`.")
         paths.append(path)
     if key not in ("base", "vae"):
         return paths[0]

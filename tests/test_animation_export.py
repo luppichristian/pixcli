@@ -10,7 +10,7 @@ from pixcli.animation_export import export_animation
 def test_exports_consistent_frames_sheet_and_timing(tmp_path):
     frames = [Image.new('RGB', (8, 4), c) for c in ('red', 'green', 'blue')]
     out = tmp_path / 'walk'
-    result = export_animation(frames, out, final_size=(8, 8), fps=10)
+    result = export_animation(frames, out, final_size=(8, 8), fps=10, save_json=True)
     assert Image.open(out / 'original_frames' / '000001.png').size == (8, 4)
     assert Image.open(out / 'frames' / '000001.png').size == (8, 8)
     assert Image.open(out / 'sheet.png').size == (24, 8)

@@ -45,9 +45,10 @@ def export_animation(
     background: tuple[int, int, int] = (255, 255, 255),
     overwrite: bool = False,
     mp4: bool = False,
+    save_json: bool = False,
     memory_guard: Callable[[], None] | None = None,
 ) -> dict:
-    """Export original and processed frames, GIF, sprite sheet and layout JSON.
+    """Export original and processed frames, GIF, sprite sheet and optional layout JSON.
 
     Frame processing uses one aspect-preserving fit/padding transform. A fixed palette
     is used across every frame. MP4 is optional and requires imageio-ffmpeg.
@@ -74,7 +75,7 @@ def export_animation(
         raise ValueError("Output directory may not be a symbolic link")
     if output.exists():
         if not overwrite:
-            raise FileExistsError(f"Output already exists: {output}; use --overwrite")
+            raise FileExistsError(f"Output already exists: {output}; use -overwrite")
         if not output.is_dir() or not (output / ".pixcli-animation").is_file():
             raise FileExistsError(f"Refusing to replace a directory not created by pixcli: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -146,7 +147,8 @@ def export_animation(
             "palette_source": "fixed" if fixed_palette is not None else ("image" if palette_image is not None else ("sequence" if palette_colors else None)),
             "fixed_palette": fixed_palette,
         }
-        (stage / "sheet.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+        if save_json:
+            (stage / "sheet.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
         check()
         if output.exists():
             backup = Path(tempfile.mkdtemp(prefix=f".{output.name}-backup-", dir=output.parent))
@@ -164,7 +166,7 @@ def export_animation(
             backup = None
         return {"frames": str(output / "frames"), "original_frames": str(output / "original_frames"),
                 "gif": str(output / "preview.gif"), "sheet": str(output / "sheet.png"),
-                "sheet_json": str(output / "sheet.json"), "mp4": str(output / "preview.mp4") if mp4 else None,
+                "sheet_json": str(output / "sheet.json") if save_json else None, "mp4": str(output / "preview.mp4") if mp4 else None,
                 "transform": info["transform"]}
     finally:
         if stage.exists():

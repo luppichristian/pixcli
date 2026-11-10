@@ -10,16 +10,17 @@ pixcli models verify [OPTIONS]
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--profile NAME` | `image` | Select the profile to verify. See [profiles](models.md#profiles) for the available names and model selections. |
-| `--cache-dir PATH` | Hugging Face cache | Check a custom cache location; use the same location used when downloading. |
-| `--help` | | Show command help and exit. |
+| `-profile NAME` | `image` | Select the profile to verify. See [profiles](models.md#profiles) for the available names and model selections. |
+| `-cache-dir PATH` | Hugging Face cache | Check a custom cache location; use the same location used when downloading. |
+| `-json` | Off | Print the result as JSON. |
+| `-help` | | Show command help and exit. |
 
 ## Examples
 
 ```powershell
-pixcli models verify --profile image
-pixcli models verify --profile animation
-pixcli models verify --profile animation-q3-text --cache-dir D:\huggingface-cache
+pixcli models verify -profile image
+pixcli models verify -profile animation
+pixcli models verify -profile animation-q3-text -cache-dir D:\huggingface-cache
 ```
 
 Verification reads the model files and can take time. If files are missing or invalid, connect to the internet and run [`models download`](models-download.md) with the same profile and cache location.

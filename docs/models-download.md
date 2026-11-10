@@ -12,17 +12,18 @@ The first download can require substantial disk space and an internet connection
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--profile NAME` | `image` | Select the model profile to download. See [profiles](models.md#profiles) for all names and their model selections. |
-| `--cache-dir PATH` | Hugging Face cache | Download to a custom cache. Use the same location for verification and inference. |
-| `--offline` / `--no-offline` | `--no-offline` | `--offline` disallows downloads and exits with an error. Use [`models verify`](models-verify.md) to inspect cached files offline. |
-| `--help` | | Show command help and exit. |
+| `-profile NAME` | `image` | Select the model profile to download. See [profiles](models.md#profiles) for all names and their model selections. |
+| `-cache-dir PATH` | Hugging Face cache | Download to a custom cache. Use the same location for verification and inference. |
+| `-offline` | Off | `-offline` disallows downloads and exits with an error. Use [`models verify`](models-verify.md) to inspect cached files offline. |
+| `-json` | Off | Print the result as JSON. |
+| `-help` | | Show command help and exit. |
 
 ## Examples
 
 ```powershell
-pixcli models download --profile image
-pixcli models download --profile animation
-pixcli models download --profile animation-q3-text --cache-dir D:\huggingface-cache
+pixcli models download -profile image
+pixcli models download -profile animation
+pixcli models download -profile animation-q3-text -cache-dir D:\huggingface-cache
 ```
 
 If access is denied, visit the relevant model page, accept its terms if required, run `hf auth login`, and retry. You can also set `HF_TOKEN` in your environment.

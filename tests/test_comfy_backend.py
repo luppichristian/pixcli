@@ -54,7 +54,7 @@ def test_cuda_adapter_requires_gpu_resident_preset(tmp_path):
 
 def test_missing_animation_models_fail_before_startup(tmp_path):
     from pixcli.comfy_backend import run_comfy
-    with pytest.raises(FileNotFoundError, match='models download --profile animation'):
+    with pytest.raises(FileNotFoundError, match='models download -profile animation'):
         run_comfy(tmp_path / 'missing.png', 'walking', '', 42, 256, 256, 17, 1.0, {})
 
 
@@ -188,14 +188,14 @@ def test_cuda_oom_reports_actual_configuration_and_no_fallback():
     from pixcli.comfy_backend import _oom_explanation
     text = _oom_explanation('torch.OutOfMemoryError: CUDA out of memory', 512, 512, 9)
     assert '512x512' in text and '9 frames' in text
-    assert '--inference-width 384' in text and '--frames 5' in text
+    assert '-inference-width 384' in text and '-frames 5' in text
     assert 'no automatic fallback' in text.lower()
     assert _oom_explanation('some unrelated failure', 512, 512, 9) is None
 
 def test_cuda_oom_advice_never_increases_canvas_size():
     from pixcli.comfy_backend import _oom_explanation
     text = _oom_explanation('CUDA out of memory', 256, 256, 5)
-    assert '--inference-width 384' not in text
+    assert '-inference-width 384' not in text
 
 def test_backend_refuses_cpu_fallback():
     from pixcli.comfy_backend import _require_cuda_device
@@ -549,5 +549,5 @@ def test_q2_model_locations_and_missing_error_use_requested_profile(tmp_path):
         path.touch()
     validate_model_locations(paths, text_encoder='q3', expert_quant='q2')
     paths['wan_low_q2'].unlink()
-    with pytest.raises(FileNotFoundError, match='--profile animation'):
+    with pytest.raises(FileNotFoundError, match='-profile animation'):
         run_comfy(tmp_path/'source.png', 'walk', '', 42, 256, 256, 5, 1.0, paths, text_encoder='q3', expert_quant='q2')

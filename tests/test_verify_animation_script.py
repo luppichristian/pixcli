@@ -14,7 +14,7 @@ from pixcli.animation_export import export_animation
 def test_verifier_uses_recorded_adapter_device(tmp_path, device):
     out = tmp_path / 'walk'
     export_animation([Image.new('RGB', (8, 8), color) for color in ('red', 'blue')],
-                     out, final_size=(8, 8), fps=8, mp4=False)
+                     out, final_size=(8, 8), fps=8, mp4=False, save_json=True)
     reports = [{'expert': expert, 'targets': 400, 'tensors': 800,
                 'unmatched': 0, 'adapter_device': device} for expert in ('high', 'low')]
     metadata = {'settings': {'frames': 2, 'pixel_width': 8, 'pixel_height': 8,

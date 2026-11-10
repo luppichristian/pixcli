@@ -348,11 +348,11 @@ def _oom_explanation(message: str, width: int, height: int, frames: int, *,
         return None
     area = width * height
     if area > 384 * 384:
-        advice = 'retry with --inference-width 384 --inference-height 384 --frames 5'
+        advice = 'retry with -inference-width 384 -inference-height 384 -frames 5'
     elif area > 256 * 256:
-        advice = 'retry with --inference-width 256 --inference-height 256 --frames 5'
+        advice = 'retry with -inference-width 256 -inference-height 256 -frames 5'
     elif frames > 5:
-        advice = 'retry with --frames 5'
+        advice = 'retry with -frames 5'
     else:
         advice = 'reduce the inference dimensions if possible'
     return (f'Animation ran out of memory at {width}x{height}, {frames} frames, '
@@ -564,7 +564,7 @@ def run_comfy(image_path, prompt: str, negative: str, seed: int, width: int, hei
     if missing:
         from .models import animation_profile
         profile = animation_profile(text_encoder, expert_quant)
-        raise FileNotFoundError(f'Missing animation models: {missing}. Run pixcli models download --profile {profile}')
+        raise FileNotFoundError(f'Missing animation models: {missing}. Run pixcli models download -profile {profile}')
     validate_model_locations(model_paths, text_encoder=text_encoder, expert_quant=expert_quant)
     _validate_animation_headroom(psutil.virtual_memory().available, _free_commit_bytes(),
                                  min_free_commit_gib, min_free_physical_gib, weight_storage)
