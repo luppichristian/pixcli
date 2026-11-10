@@ -138,9 +138,21 @@ def _run_image(settings, cache_dir):
         fail(exc)
 
 
+def _style_settings(name: str | None, palette: str | None) -> dict:
+    from .styles import load_style
+    try:
+        style = load_style(name)
+        return {'style': name, 'style_prompt': style.prompt if style else None,
+                'palette': palette if palette is not None else (style.palette if style else None)}
+    except ValueError as exc:
+        fail(exc)
+
+
 @app.command()
 def gen(
     prompt: str = typer.Option(...), out: Path = typer.Option(...),
+    style: Optional[str] = typer.Option(None, help='Style name from styles/NAME.txt in the current directory.'),
+    palette: Optional[str] = typer.Option(None, help='Palette name from palettes/ in the current directory.'),
     negative_prompt: str = typer.Option(""), seed: int = typer.Option(42), steps: int = typer.Option(30),
     guidance: float = typer.Option(7.0), lora_strength: float = typer.Option(1.0),
     inference_width: int = typer.Option(1024), inference_height: int = typer.Option(1024),
@@ -157,12 +169,14 @@ def gen(
 ):
     """Generate an image from text, entirely offline."""
     from .image import ImageSettings
-    _run_image(ImageSettings(prompt=prompt, out=out, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, pixel_width=pixel_width, pixel_height=pixel_height, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device), cache_dir)
+    _run_image(ImageSettings(prompt=prompt, out=out, **_style_settings(style, palette), negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, pixel_width=pixel_width, pixel_height=pixel_height, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device), cache_dir)
 
 
 @app.command()
 def edit(
     input: Path = typer.Option(...), prompt: str = typer.Option(...), out: Path = typer.Option(...),
+    style: Optional[str] = typer.Option(None, help='Style name from styles/NAME.txt in the current directory.'),
+    palette: Optional[str] = typer.Option(None, help='Palette name from palettes/ in the current directory.'),
     mask: Optional[Path] = typer.Option(None), strength: float = typer.Option(0.3),
     negative_prompt: str = typer.Option(""), seed: int = typer.Option(42), steps: int = typer.Option(30),
     guidance: float = typer.Option(7.0), lora_strength: float = typer.Option(1.0),
@@ -180,12 +194,14 @@ def edit(
 ):
     """Edit an image; white mask pixels are editable and black are preserved."""
     from .image import ImageSettings
-    _run_image(ImageSettings(prompt=prompt, out=out, input_path=input, mask_path=mask, strength=strength, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, background=background, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device), cache_dir)
+    _run_image(ImageSettings(prompt=prompt, out=out, **_style_settings(style, palette), input_path=input, mask_path=mask, strength=strength, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, background=background, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device), cache_dir)
 
 
 @app.command()
 def animate(
     input: Path = typer.Option(...), prompt: str = typer.Option(...), out: Path = typer.Option(...),
+    style: Optional[str] = typer.Option(None, help='Style name from styles/NAME.txt in the current directory.'),
+    palette: Optional[str] = typer.Option(None, help='Palette name from palettes/ in the current directory.'),
     negative_prompt: str = typer.Option(""), seed: int = typer.Option(42), steps: int = typer.Option(4),
     guidance: float = typer.Option(1.0), lora_strength: float = typer.Option(1.0), preset: str = typer.Option("low-vram"),
     backend: str = typer.Option("comfyui-gguf"), text_encoder: str = typer.Option("q3"), expert_quant: str = typer.Option("q2"), adapter_device: str = typer.Option("cpu"), weight_storage: str = typer.Option("mmap"), inference_width: int = typer.Option(256),
@@ -206,7 +222,7 @@ def animate(
     from .animation import AnimationSettings, run_animation, validate_animation_job
     from . import models
     try:
-        settings = AnimationSettings(input_path=input, prompt=prompt, out=out, negative_prompt=negative_prompt,
+        settings = AnimationSettings(input_path=input, prompt=prompt, out=out, **_style_settings(style, palette), negative_prompt=negative_prompt,
                                      seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, preset=preset, backend=backend, text_encoder=text_encoder, expert_quant=expert_quant, adapter_device=adapter_device, weight_storage=weight_storage,
                                      inference_width=inference_width, inference_height=inference_height, frames=frames, fps=fps,
                                      pixel_width=pixel_width, pixel_height=pixel_height, palette_colors=palette_colors, palette_image=palette_image,
@@ -218,6 +234,8 @@ def animate(
         typer.echo("Local Wan backend: memory requirements and output quality depend on the selected settings.", err=True)
         result = run_animation(settings, paths, progress=lambda message: typer.echo(message, err=True))
         typer.echo(json.dumps(result, indent=2, default=str))
+    except typer.Exit:
+        raise
     except Exception as exc:
         fail(exc)
 

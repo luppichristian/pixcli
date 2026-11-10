@@ -33,6 +33,8 @@ Animation is experimental. A five-frame run completed on the hardware described 
 | `--pixel-height INTEGER` | `128` | Height of each output frame, from 1 to 2048. |
 | `--palette-colors INTEGER` | None | Reduce output frames to a shared palette of 2–256 colors. |
 | `--palette-image PATH` | None | Derive the shared palette from this image. Requires `--palette-colors`; the image must be outside the output directory. Without it, the palette is derived from the generated frames. |
+| `--palette NAME` | None | Map resized frames to a palette in `palettes/`. Cannot be combined with `--palette-colors` or `--palette-image`. |
+| `--style NAME` | None | Append the prompt in `styles/NAME.txt` to the positive prompt. |
 | `--background COLOR` | `#ffffff` | RGB color used for transparent source pixels and padding. |
 | `--mp4` / `--no-mp4` | `--mp4` | Include or skip MP4 export. |
 | `--overwrite` / `--no-overwrite` | `--no-overwrite` | Replace an existing output directory only if it was created by pixcli. |
@@ -44,6 +46,8 @@ Animation is experimental. A five-frame run completed on the hardware described 
 Inference dimensions must each be multiples of 16 from 16 to 832, with an area of at most 832×480 pixels. Some combinations of frame count and dimensions also exceed an internal allocation limit. Larger settings can require more memory even when they satisfy these checks.
 
 Input images are fitted without stretching and padded as needed. Transparent pixels are composited over the background; generated frames are opaque. Output includes the original generated frames, resized frames, `sheet.png`, `preview.gif`, `preview.mp4` unless disabled, and JSON metadata.
+
+With `--palette`, original generated frames remain unchanged; resized PNG frames and the sprite sheet use the selected palette. MP4 compression can change colors. See [Palettes and styles](../README.md#palettes-and-styles) for file formats and examples.
 
 ## Model and memory options
 

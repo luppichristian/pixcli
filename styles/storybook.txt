@@ -1,0 +1,3 @@
+palette: soft
+
+storybook illustration, simple shapes, soft colors, clear silhouette

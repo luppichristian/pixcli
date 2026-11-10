@@ -18,6 +18,8 @@ from typing import Any
 
 from PIL import Image, ImageColor
 from .processing import finish_edit, pixelate, prepare_edit
+from .styles import styled_prompt
+from .palette import apply_palette, load_palette
 
 
 @dataclass
@@ -40,6 +42,7 @@ class ImageSettings:
     save_original: bool = False
     preview_scale: int = 1
     palette_colors: int | None = None
+    palette: str | None = None
     overwrite: bool = False
     ram_budget_gib: float | None = None
     vram_budget_gib: float | None = None
@@ -47,6 +50,8 @@ class ImageSettings:
     min_free_physical_gib: float = 2.0
     weight_storage: str = 'auto'
     device: str = 'auto'
+    style: str | None = None
+    style_prompt: str | None = None
 
 
 def validate_image(s: ImageSettings) -> None:
@@ -82,6 +87,10 @@ def validate_image(s: ImageSettings) -> None:
         raise ValueError('generation pixel dimensions and inference dimensions must have the same aspect ratio; choose matching sizes to avoid stretching')
     if not 1 <= s.preview_scale <= 16:
         raise ValueError('preview scale must be between 1 and 16')
+    if s.palette is not None:
+        if s.palette_colors is not None:
+            raise ValueError('palette cannot be combined with palette colors')
+        load_palette(s.palette)
     if s.palette_colors is not None and not 2 <= s.palette_colors <= 256:
         raise ValueError('palette colors must be between 2 and 256')
     if s.mask_path and not s.input_path:
@@ -394,7 +403,7 @@ def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.
             else:
                 memory_mode = _configure_image_offload(pipe, s.ram_budget_gib, s.vram_budget_gib, weight_storage)
         guard.sample()
-        args: dict[str, Any] = dict(prompt=s.prompt, negative_prompt=s.negative_prompt, num_inference_steps=s.steps,
+        args: dict[str, Any] = dict(prompt=styled_prompt(s.prompt, s.style_prompt), negative_prompt=s.negative_prompt, num_inference_steps=s.steps,
                                     guidance_scale=s.guidance, generator=torch.Generator(device='cpu').manual_seed(s.seed),
                                     callback_on_step_end=guard.callback)
         if image is None:
@@ -454,6 +463,7 @@ def run_image(s: ImageSettings, model_paths: dict[str, Path]) -> dict[str, Any]:
 
 def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path]) -> dict[str, Any]:
     validate_image(s)
+    fixed_palette = load_palette(s.palette) if s.palette is not None else None
     job_guard = _ImageMemoryGuard(s.ram_budget_gib, s.min_free_commit_gib, s.min_free_physical_gib)
     if job_guard:
         job_guard.sample()
@@ -487,10 +497,16 @@ def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path]) -> dict[st
         processing = ['nearest-neighbor resize to final dimensions']
         if s.palette_colors:
             processing.append(f'palette reduction to {s.palette_colors} colors, no dithering')
+        if fixed_palette is not None:
+            result = apply_palette(result, fixed_palette)
+            processing.append('map to fixed palette, no dithering')
     else:
-        result = finish_edit(source, generated, box, mask)
+        edited = apply_palette(generated, fixed_palette) if fixed_palette is not None else generated
+        result = finish_edit(source, edited, box, mask)
         processing = ['alpha composite source onto inference background', f'aspect-preserving nearest-neighbor fit and letterbox {box}',
                       'crop inference padding and nearest-neighbor resize to source dimensions', 'retain source alpha']
+        if fixed_palette is not None:
+            processing.append('map edited pixels to fixed palette, no dithering')
         if mask is not None:
             processing.append('composite edit over original using grayscale mask; black pixels unchanged')
     if s.preview_scale > 1:
@@ -510,7 +526,7 @@ def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path]) -> dict[st
     metadata = {'schema_version': 1, 'operation': 'edit' if source else 'gen', 'settings': settings, 'offline': True,
                 'input_hashes': input_hashes, 'models': models, 'backend': 'diffusers', 'runtime': runtime,
                 'dependency_versions': versions, 'inference_dimensions': [s.inference_width, s.inference_height],
-                'final_dimensions': list(result.size), 'processing': processing,
+                'final_dimensions': list(result.size), 'processing': processing, 'fixed_palette': fixed_palette,
                 'elapsed_seconds': round(time.perf_counter() - started, 3), 'fallbacks': []}
     output_bytes = _image_bytes(result)
     if job_guard:

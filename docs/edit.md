@@ -26,6 +26,8 @@ This writes `outputs/red-knight.png` and `outputs/red-knight.json`. Lower edit s
 | `--background COLOR` | `#ffffff` | Set the RGB color used behind transparent input and for padding, for example `'#000000'`. |
 | `--preview-scale INTEGER` | `1` | Enlarge the edited image with nearest-neighbor scaling for a preview. Values from 2 to 16 create a separate `.preview.png` file. |
 | `--palette-colors INTEGER` | None | This option appears in help, but specifying a value for an edit is rejected to preserve untouched pixels. |
+| `--palette NAME` | None | Map the edited image to a palette in `palettes/`. Black mask pixels stay unchanged; gray mask pixels blend with the original and may fall outside the palette. |
+| `--style NAME` | None | Append the prompt in `styles/NAME.txt` to the positive prompt. |
 | `--save-original` / `--no-save-original` | Off | Save or skip the inference-resolution result as `.original.png`. |
 | `--overwrite` / `--no-overwrite` | Off | Allow or prevent replacement of existing outputs or inputs. |
 | `--device TEXT` | `auto` | Choose `auto`, `cuda`, or `cpu`. Auto selects CUDA if available, otherwise CPU. |
@@ -47,6 +49,8 @@ pixcli edit --input outputs/knight.png --mask armor-mask.png `
 ```
 
 The mask controls the final blend after the whole image has been edited; this is not a dedicated inpainting model. Transparent input is composited onto `--background` for inference and retains its original alpha in the result, so new shapes do not acquire a new alpha channel.
+
+Add `--palette soft --style storybook` to use the supplied examples. See [Palettes and styles](../README.md#palettes-and-styles) for file formats and how to add your own.
 
 Save an enlarged preview and use a smaller inference canvas:
 

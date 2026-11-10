@@ -66,6 +66,33 @@ The output directory contains PNG frames, a sprite sheet, a GIF, an MP4, and met
 
 Animation is experimental and memory-intensive. The default produces five 128×128 frames at 8 fps. A test on the hardware above completed, but the requested walking motion was subtle. Longer or larger animations can require more memory, and looping playback does not guarantee a seamless loop. Transparent input is composited over a background; generated frames are opaque.
 
+## Palettes and styles
+
+Place palette files in `palettes/` and style prompts in `styles/` in the current working directory. Select them by name with `--palette` and `--style` on `gen`, `edit`, or `animate`:
+
+```powershell
+pixcli gen --prompt "a knight" --out outputs/knight.png --style storybook
+```
+
+For example, `palettes/soft.hex` contains one six-digit RGB hex color per line, and `styles/storybook.txt` contains text appended to the prompt. The repository includes both examples. Palettes also support GIMP `.gpl`, JASC `.pal`, and Paint.NET `.txt` files. You can include the file extension in a palette name. If an extensionless name matches more than one palette file, specify the extension. Palettes may contain 1–256 colors; Paint.NET colors must have an opaque `FF` alpha value. The selected style text and palette colors are recorded in output metadata. A selected palette maps output colors to the supplied colors; it cannot be combined with `--palette-colors` or animation's `--palette-image`.
+
+
+The included palettes are `soft` (5 colors), `handheld-green` (4), `grayscale` (7), `cozy` (8), `neon` (8), and `retro` (12). For example, add `--palette handheld-green` to a command for a four-shade green output.
+
+The included styles are `8bit`, `16bit`, `gameboy`, `isometric`, `cozy`, `dark-fantasy`, `cyberpunk`, `monochrome`, and `storybook`. They guide the model with prompt text; `storybook` also selects the included `soft` palette for exact output colors.
+
+A style can select a palette by placing `palette: NAME` on its first line, followed by the prompt text. For example:
+
+```text
+palette: soft
+
+storybook illustration, simple shapes, soft colors
+```
+
+Use `--style storybook` to apply both. An explicit `--palette` overrides the style's palette. A style-selected palette cannot be combined with `--palette-colors` or `--palette-image`; choose a style without a palette to use those options. The selected palette must exist in `palettes/` when the command runs.
+
+For masked edits, black mask pixels remain unchanged and gray mask pixels blend the original with the palette-mapped edit, so those pixels may fall outside the selected palette. Animation's original generated frames are retained without palette mapping; resized PNG frames and the sprite sheet use the selected palette. MP4 compression can change colors.
+
 ## Memory budgets
 
 Each generation, edit, or animation command accepts `--ram-budget-gib` and `--vram-budget-gib`. On Windows, a RAM budget bounds working sets and allows file-backed weights to be paged in as needed; animation accounts for the command and its backend processes together. RAM checks are also sampled, so brief peaks can exceed a limit. The VRAM budget limits PyTorch's CUDA allocator; it does not include every GPU allocation. Image jobs stream tensors from their model files when a RAM budget is set, and animation uses mapped expert weights by default. Streaming can be slower, and inference still needs enough memory for its active tensors and operating-system overhead. See the command references for the budget scope and storage options.

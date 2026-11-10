@@ -41,6 +41,7 @@ def export_animation(
     fps: float,
     palette_colors: int | None = None,
     palette_image: Image.Image | None = None,
+    fixed_palette: Sequence[tuple[int, int, int]] | None = None,
     background: tuple[int, int, int] = (255, 255, 255),
     overwrite: bool = False,
     mp4: bool = False,
@@ -65,6 +66,8 @@ def export_animation(
         raise ValueError("FPS must be greater than zero and no greater than 100")
     if palette_colors is not None and not 2 <= palette_colors <= 256:
         raise ValueError("Palette colors must be between 2 and 256")
+    if fixed_palette is not None and (palette_colors is not None or palette_image is not None):
+        raise ValueError("A fixed palette cannot be combined with palette colors or a palette image")
     if palette_image is not None and palette_colors is None:
         raise ValueError("A palette image requires palette_colors")
     if output.is_symlink():
@@ -97,8 +100,12 @@ def export_animation(
             canvas.paste(frame.resize(scaled, Image.Resampling.NEAREST), offset)
             processed.append(canvas)
             check()
-        global_palette = _palette(processed, palette_colors or 256, palette_image)
-        if palette_colors is not None:
+        if fixed_palette is not None:
+            from .palette import pillow_palette
+            global_palette = pillow_palette(fixed_palette)
+        else:
+            global_palette = _palette(processed, palette_colors or 256, palette_image)
+        if palette_colors is not None or fixed_palette is not None:
             processed = [frame.quantize(palette=global_palette, dither=Image.Dither.NONE) for frame in processed]
         for i, frame in enumerate(processed):
             frame.save(stage / "frames" / f"{i:06d}.png")
@@ -136,7 +143,8 @@ def export_animation(
                           "final_size": [dest_w, dest_h], "paste_offset": list(offset),
                           "resampling": "nearest", "background": list(background)},
             "palette_colors": palette_colors,
-            "palette_source": "image" if palette_image is not None else ("sequence" if palette_colors else None),
+            "palette_source": "fixed" if fixed_palette is not None else ("image" if palette_image is not None else ("sequence" if palette_colors else None)),
+            "fixed_palette": fixed_palette,
         }
         (stage / "sheet.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
         check()

@@ -23,6 +23,8 @@ This creates `outputs/knight.png` and `outputs/knight.json`. Existing outputs ar
 | `--pixel-width INTEGER`, `--pixel-height INTEGER` | `128`, `128` | Set the final sprite dimensions, each from 1 to 2048. Their aspect ratio must match the inference dimensions. |
 | `--preview-scale INTEGER` | `1` | Enlarge the sprite with nearest-neighbor scaling for a preview. Values from 2 to 16 create a separate `.preview.png` file. |
 | `--palette-colors INTEGER` | None | Reduce the final sprite to 2–256 colors. |
+| `--palette NAME` | None | Map the final sprite to a palette in `palettes/`. Cannot be combined with `--palette-colors`. |
+| `--style NAME` | None | Append the prompt in `styles/NAME.txt` to the positive prompt. |
 | `--save-original` / `--no-save-original` | Off | Save or skip the inference-resolution image as `.original.png`. |
 | `--overwrite` / `--no-overwrite` | Off | Allow or prevent replacing existing output files. |
 | `--device TEXT` | `auto` | Choose `auto`, `cuda`, or `cpu`. Auto selects CUDA if available, otherwise CPU. |
@@ -48,6 +50,12 @@ Reduce the final sprite to 16 colors:
 
 ```powershell
 pixcli gen --prompt "pixel art, a treasure chest" --out outputs/chest.png --palette-colors 16
+```
+
+Use the example palette and style, or add your own files as described in [Palettes and styles](../README.md#palettes-and-styles):
+
+```powershell
+pixcli gen --prompt "a treasure chest" --out outputs/chest.png --palette soft --style storybook
 ```
 
 Disk streaming constructs the model without loading its full weights, then reads tensors from the original checkpoint files as needed. It trades disk access and speed for lower memory use; keep model files unchanged while the job runs. On Windows, the RAM budget sets a process working-set maximum and the job also checks its sampled resident memory. The VRAM limit applies to PyTorch's allocator, not all GPU allocations or other applications, and cannot be used with CPU execution. Both commands stop if sampled available physical or Windows commit memory falls below its selected reserve; the default is 2 GiB for each. Model activations, operating-system memory and other processes still need headroom, and short spikes can exceed sampled limits.

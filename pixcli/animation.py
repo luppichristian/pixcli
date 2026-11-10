@@ -13,6 +13,8 @@ from typing import Callable
 from PIL import Image, ImageColor
 from .animation_export import export_animation
 from .comfy_backend import build_graph, run_comfy, validate_animation, validate_memory_budget
+from .styles import styled_prompt
+from .palette import load_palette
 
 
 @dataclass
@@ -45,10 +47,13 @@ class AnimationSettings:
     ram_budget_gib: float | None = None
     vram_budget_gib: float | None = None
     palette_colors: int | None = None
+    palette: str | None = None
     palette_image: Path | None = None
     background: str = '#ffffff'
     mp4: bool = True
     overwrite: bool = False
+    style: str | None = None
+    style_prompt: str | None = None
 
 
 def _check_mp4_dependencies() -> None:
@@ -103,6 +108,10 @@ def validate_animation_job(s: AnimationSettings) -> None:
         raise ValueError('pixel dimensions must be between 1 and 2048')
     if not math.isfinite(s.fps) or not 0 < s.fps <= 100:
         raise ValueError('fps must be greater than zero and at most 100')
+    if s.palette is not None:
+        if s.palette_colors is not None or s.palette_image is not None:
+            raise ValueError('palette cannot be combined with palette colors or palette image')
+        load_palette(s.palette)
     if s.palette_colors is not None and not 2 <= s.palette_colors <= 256:
         raise ValueError('palette colors must be between 2 and 256')
     if s.palette_image is not None and s.palette_colors is None:
@@ -113,6 +122,9 @@ def validate_animation_job(s: AnimationSettings) -> None:
     except ValueError as exc:
         raise ValueError('background must be an RGB color such as #ffffff') from exc
     source, out = Path(s.input_path), Path(s.out)
+    for name, selected in (('palettes', s.palette), ('styles', s.style)):
+        if selected is not None and Path(name).resolve().is_relative_to(out.resolve()):
+            raise ValueError(f'{name} directory must not be inside the output directory')
     if source.resolve().is_relative_to(out.resolve()):
         raise ValueError('input must not be inside the output directory')
     with Image.open(source) as image:
@@ -142,6 +154,7 @@ def run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[s
 def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[str], None] | None,
                    limit_applied: bool) -> dict:
     validate_animation_job(s)
+    fixed_palette = load_palette(s.palette) if s.palette is not None else None
     from .comfy_backend import (_check_sampled_budgets, _process_tree_resident_bytes,
                                 _free_commit_bytes, memory_guard_violation)
     import psutil
@@ -160,7 +173,7 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
         for block in iter(lambda: f.read(1024 * 1024), b''):
             sha.update(block)
     started = time.perf_counter()
-    frames, audit = run_comfy(source, s.prompt, s.negative_prompt, s.seed, s.inference_width,
+    frames, audit = run_comfy(source, styled_prompt(s.prompt, s.style_prompt), s.negative_prompt, s.seed, s.inference_width,
                               s.inference_height, s.frames, s.guidance, model_paths,
                               background=ImageColor.getrgb(s.background), lora_strength=s.lora_strength,
                               text_encoder=s.text_encoder, expert_quant=s.expert_quant, preset=s.preset,
@@ -184,7 +197,7 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
                 palette_hash.update(block)
         palette_sha256 = palette_hash.hexdigest()
     result = export_animation(frames, s.out, final_size=(s.pixel_width, s.pixel_height), fps=s.fps,
-                              palette_colors=s.palette_colors, palette_image=palette, background=ImageColor.getrgb(s.background),
+                              palette_colors=s.palette_colors, palette_image=palette, fixed_palette=fixed_palette, background=ImageColor.getrgb(s.background),
                               overwrite=s.overwrite, mp4=s.mp4, memory_guard=guard)
     from .models import animation_profile, list_models
     profile = animation_profile(s.text_encoder, s.expert_quant)
@@ -197,7 +210,7 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
             versions[package] = version(package)
         except PackageNotFoundError:
             versions[package] = None
-    graph = build_graph('source.png', s.prompt, s.negative_prompt, s.seed, s.inference_width,
+    graph = build_graph('source.png', styled_prompt(s.prompt, s.style_prompt), s.negative_prompt, s.seed, s.inference_width,
                         s.inference_height, s.frames, s.guidance, s.lora_strength, text_encoder=s.text_encoder,
                         expert_quant=s.expert_quant, adapter_device=s.adapter_device, weight_storage=s.weight_storage)
     high, low = graph['high_sample']['inputs'], graph['low_sample']['inputs']
@@ -208,7 +221,7 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
                 'distillation_lora_strength': graph['high_distill']['inputs']['strength_model'],
                 'motion_amplitude': graph['condition']['inputs']['motion_amplitude']}
     metadata = {'schema_version': 1, 'operation': 'animate', 'offline': True, 'settings': {k: str(v) if isinstance(v, Path) else v for k, v in asdict(s).items()},
-                'input_sha256': sha.hexdigest(), 'palette_sha256': palette_sha256, 'models': models, 'backend': s.backend,
+                'input_sha256': sha.hexdigest(), 'palette_sha256': palette_sha256, 'fixed_palette': fixed_palette, 'models': models, 'backend': s.backend,
                 'model_profile': profile,
                 'runtime': audit, 'dependency_versions': versions, 'precision': 'mixed',
                 'quantization': f"GGUF {'Q2_K' if s.expert_quant == 'q2' else 'Q3_K_S'} experts; {'Q3_K_S' if s.text_encoder == 'q3' else 'FP8'} text",
