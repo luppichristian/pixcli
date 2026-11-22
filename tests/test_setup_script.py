@@ -39,7 +39,7 @@ class Stub {
     return executable
 
 
-def run_setup(tmp_path, fake_executable, failure=''):
+def run_setup(tmp_path, fake_executable, failure='', arguments=()):
     project = tmp_path / 'project'
     scripts = project / 'scripts'
     binary = project / '.venv' / 'Scripts'
@@ -58,7 +58,7 @@ if ($env:PIXCLI_TEST_FAIL -eq 'backend') { throw 'simulated backend failure' }
     env = os.environ.copy()
     env.update(PATH=str(fake_bin) + os.pathsep + env['PATH'],
                PIXCLI_TEST_LOG=str(log), PIXCLI_TEST_FAIL=failure)
-    result = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-File', str(project / 'setup.ps1')],
+    result = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-File', str(project / 'setup.ps1'), *arguments],
                             cwd=project, env=env, capture_output=True, text=True)
     calls = log.read_text().splitlines() if log.exists() else []
     return result, calls
@@ -76,6 +76,12 @@ def test_setup_prepares_every_feature(tmp_path, fake_executable):
     result, calls = run_setup(tmp_path, fake_executable)
     assert result.returncode == 0, result.stderr
     assert calls == CALLS
+
+
+def test_setup_can_skip_model_downloads_for_custom_configurations(tmp_path, fake_executable):
+    result, calls = run_setup(tmp_path, fake_executable, arguments=['-SkipModels'])
+    assert result.returncode == 0, result.stderr
+    assert calls == CALLS[:2]
 
 
 @pytest.mark.parametrize('failure_index', range(len(CALLS)))

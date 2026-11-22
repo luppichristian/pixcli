@@ -1,0 +1,8 @@
+# Select models for each operation. See docs/models.md for Hugging Face,
+# local Diffusers, and compatible Wan animation model examples.
+version = 1
+
+[defaults]
+generation = "default-image"
+editing = "default-image"
+animation = "default-animation"

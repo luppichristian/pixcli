@@ -13,7 +13,7 @@ import typer
 from typer.completion import install_callback, show_callback
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, context_settings={'help_option_names': ['-help']}, help="Generate, edit, and animate pixel art locally.")
-models_app = typer.Typer(no_args_is_help=True, add_completion=False, context_settings={'help_option_names': ['-help']}, help="Manage pinned local model files.")
+models_app = typer.Typer(no_args_is_help=True, add_completion=False, context_settings={'help_option_names': ['-help']}, help="Manage configured and pinned models.")
 app.add_typer(models_app, name="models")
 
 
@@ -69,7 +69,7 @@ def _os_description() -> str:
 
 
 @app.command()
-def doctor(cache_dir: Optional[Path] = typer.Option(None, '-cache-dir', help="Hugging Face Hub cache directory."), json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
+def doctor(cache_dir: Optional[Path] = typer.Option(None, '-cache-dir', help="Hugging Face Hub cache directory."), config: Optional[Path] = typer.Option(None, '-config', help='Model configuration file.'), json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
     """Report hardware, environment and offline model readiness."""
     from . import models
     import importlib.metadata as md
@@ -123,14 +123,115 @@ def doctor(cache_dir: Optional[Path] = typer.Option(None, '-cache-dir', help="Hu
     python = root / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     installed = (root / 'ready.json').is_file() and python.is_file() and (root / 'ComfyUI' / 'main.py').is_file() and (root / 'ComfyUI' / 'custom_nodes' / 'pixcli_wan' / '__init__.py').is_file()
     report["animation_backend"] = "installed, runtime unverified" if installed else "setup incomplete, runtime unverified"
+    try:
+        from . import model_config, model_store
+        catalog = model_config.load_config(config)
+        report['selected_models'] = {
+            operation: model_store.status(model_config.select_model(catalog, operation), cache_dir)
+            for operation in ('generation', 'editing', 'animation')
+        }
+    except Exception as exc:
+        report['selected_models_error'] = str(exc)
     _output(report, json_output)
 
 
 @models_app.command("list")
-def model_list(json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
-    """Show pinned repositories, revisions and required files."""
+def model_list(config: Optional[Path] = typer.Option(None, '-config', help='Model configuration file.'), json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
+    """Show pinned files, configured model names and operation defaults."""
     from . import models
-    _output(models.list_models(), json_output)
+    from . import model_config
+    try:
+        result = dict(models.list_models())
+        catalog = model_config.load_config(config)
+        result['configured_models'] = {name: {'backend': value['backend']} for name, value in catalog['models'].items()}
+        result['operation_defaults'] = catalog['defaults']
+        _output(result, json_output)
+    except Exception as exc:
+        fail(exc)
+
+
+def _named_model(name: str, config: Path | None):
+    from . import model_config
+    catalog = model_config.load_config(config)
+    try:
+        backend = catalog['models'][name]['backend']
+    except KeyError as exc:
+        raise ValueError(f'Unknown model {name!r}; run pixcli models list.') from exc
+    operation = 'animation' if backend in ('builtin-animation', 'wan-i2v') else 'generation'
+    return model_config.select_model(catalog, operation, name)
+
+
+@models_app.command("status")
+def model_status(name: Optional[str] = typer.Argument(None, help='Configured model name; omit to show all.'),
+                 config: Optional[Path] = typer.Option(None, '-config'),
+                 cache_dir: Optional[Path] = typer.Option(None, '-cache-dir'),
+                 installed: bool = typer.Option(False, '-installed', help='List all managed installations, including older configurations.'),
+                 json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
+    """Show which configured models are locally available."""
+    from . import model_config, model_store
+    try:
+        if installed:
+            if name is not None:
+                raise ValueError('Choose a model name or -installed, not both.')
+            result = model_store.installed(cache_dir)
+        elif name is not None:
+            result = model_store.status(_named_model(name, config), cache_dir)
+        else:
+            catalog = model_config.load_config(config)
+            result = {item: model_store.status(_named_model(item, config), cache_dir) for item in catalog['models']}
+        _output(result, json_output)
+    except Exception as exc:
+        fail(exc)
+
+
+@models_app.command("install")
+def model_install(name: str = typer.Argument(..., help='Configured model name.'),
+                  config: Optional[Path] = typer.Option(None, '-config'),
+                  cache_dir: Optional[Path] = typer.Option(None, '-cache-dir'),
+                  offline: bool = typer.Option(False, '-offline', help='Disallow network access.'),
+                  json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
+    """Install a configured model into pixcli-managed storage."""
+    from . import model_store
+    try:
+        selected = _named_model(name, config)
+        if offline:
+            result = model_store.status(selected, cache_dir)
+            if not result['installed']:
+                raise ValueError(f'Offline mode forbids downloading missing model files: {result.get("detail", name)}')
+        elif json_output:
+            from contextlib import redirect_stdout
+            with redirect_stdout(sys.stderr):
+                result = model_store.install(selected, cache_dir)
+        else:
+            result = model_store.install(selected, cache_dir)
+        _output(result, json_output)
+    except Exception as exc:
+        fail(exc)
+
+
+@models_app.command("uninstall")
+def model_uninstall(name: str = typer.Argument(..., help='Configured model name.'),
+                    config: Optional[Path] = typer.Option(None, '-config'),
+                    cache_dir: Optional[Path] = typer.Option(None, '-cache-dir'),
+                    json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
+    """Remove pixcli-managed files for a configured model."""
+    from . import model_store
+    try:
+        _output(model_store.uninstall(_named_model(name, config), cache_dir), json_output)
+    except Exception as exc:
+        fail(exc)
+
+
+@models_app.command("uninstall-id")
+def model_uninstall_id(install_id: str = typer.Argument(..., help='Managed installation ID from models status -installed.'),
+                       cache_dir: Optional[Path] = typer.Option(None, '-cache-dir'),
+                       json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
+    """Remove a managed installation whose configuration changed or was removed."""
+    from . import model_store
+    try:
+        _output(model_store.uninstall_id(install_id, cache_dir), json_output)
+    except Exception as exc:
+        fail(exc)
 
 
 @models_app.command("download")
@@ -150,11 +251,15 @@ def model_download(profile: str = typer.Option("image", '-profile'), cache_dir: 
 
 
 @models_app.command("verify")
-def model_verify(profile: str = typer.Option("image", '-profile'), cache_dir: Optional[Path] = typer.Option(None, '-cache-dir'), json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
-    """Verify pinned file sizes and hashes without network access."""
+def model_verify(profile: str = typer.Option("image", '-profile'), cache_dir: Optional[Path] = typer.Option(None, '-cache-dir'), model: Optional[str] = typer.Option(None, '-model', help='Verify a configured model.'), config: Optional[Path] = typer.Option(None, '-config'), json_output: bool = typer.Option(False, '-json', help='Print JSON output.')):
+    """Verify a pinned profile or configured model without network access."""
     from . import models
     try:
-        result = models.verify(profile, cache_dir)
+        if model is None:
+            result = models.verify(profile, cache_dir)
+        else:
+            from . import model_store
+            result = model_store.verify(_named_model(model, config), cache_dir)
         if json_output:
             _output(result, True)
         else:
@@ -168,13 +273,18 @@ def model_verify(profile: str = typer.Option("image", '-profile'), cache_dir: Op
         fail(exc)
 
 
-def _run_image(settings, cache_dir):
-    from . import models
+def _run_image(settings, cache_dir, config=None, model=None):
+    from . import model_config, model_store
     from .image import run_image, validate_image
     try:
         validate_image(settings)
-        paths = {key: models.model_path(key, cache_dir) for key in ("base", "vae", "lora")}
-        result = run_image(settings, paths)
+        catalog = model_config.load_config(config)
+        selected = model_config.select_model(catalog, 'editing' if settings.input_path else 'generation', model)
+        paths, provenance = model_store.resolve(selected, cache_dir)
+        if selected['backend'] == 'builtin-image':
+            result = run_image(settings, paths)
+        else:
+            result = run_image(settings, paths, model_spec={**selected, 'provenance': provenance})
         if settings.save_json:
             _output(result, True)
         else:
@@ -211,11 +321,16 @@ def gen(
     device: str = typer.Option('auto', '-device', help='Compute device: auto, cuda, or cpu.'),
     weight_storage: str = typer.Option('auto', '-weight-storage', help='Image weights: auto, memory or disk-backed offload.'),
     cache_dir: Optional[Path] = typer.Option(None, '-cache-dir'), offline: bool = typer.Option(False, '-offline', help="Explicit offline mode (inference is always offline)."),
+    config: Optional[Path] = typer.Option(None, '-config', help='Model configuration file.'), model: Optional[str] = typer.Option(None, '-model', help='Override the configured generation model.'),
     json_output: bool = typer.Option(False, '-json', help='Print JSON and save metadata files.'),
 ):
     """Generate an image from text, entirely offline."""
     from .image import ImageSettings
-    _run_image(ImageSettings(prompt=prompt, out=out, save_json=json_output, **_style_settings(style, palette), negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, pixel_width=pixel_width, pixel_height=pixel_height, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device), cache_dir)
+    settings = ImageSettings(prompt=prompt, out=out, save_json=json_output, **_style_settings(style, palette), negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, pixel_width=pixel_width, pixel_height=pixel_height, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device)
+    if config is None and model is None:
+        _run_image(settings, cache_dir)
+    else:
+        _run_image(settings, cache_dir, config, model)
 
 
 @app.command()
@@ -237,11 +352,16 @@ def edit(
     device: str = typer.Option('auto', '-device', help='Compute device: auto, cuda, or cpu.'),
     weight_storage: str = typer.Option('auto', '-weight-storage', help='Image weights: auto, memory or disk-backed offload.'),
     offline: bool = typer.Option(False, '-offline', help="Explicit offline mode (inference is always offline)."),
+    config: Optional[Path] = typer.Option(None, '-config', help='Model configuration file.'), model: Optional[str] = typer.Option(None, '-model', help='Override the configured editing model.'),
     json_output: bool = typer.Option(False, '-json', help='Print JSON and save metadata files.'),
 ):
     """Edit an image; white mask pixels are editable and black are preserved."""
     from .image import ImageSettings
-    _run_image(ImageSettings(prompt=prompt, out=out, save_json=json_output, **_style_settings(style, palette), input_path=input, mask_path=mask, strength=strength, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, background=background, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device), cache_dir)
+    settings = ImageSettings(prompt=prompt, out=out, save_json=json_output, **_style_settings(style, palette), input_path=input, mask_path=mask, strength=strength, negative_prompt=negative_prompt, seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, inference_width=inference_width, inference_height=inference_height, background=background, preview_scale=preview_scale, palette_colors=palette_colors, save_original=save_original, overwrite=overwrite, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib, weight_storage=weight_storage, device=device)
+    if config is None and model is None:
+        _run_image(settings, cache_dir)
+    else:
+        _run_image(settings, cache_dir, config, model)
 
 
 @app.command()
@@ -251,7 +371,7 @@ def animate(
     palette: Optional[str] = typer.Option(None, '-palette', help='Palette name from palettes/ in the current directory.'),
     negative_prompt: str = typer.Option("", '-negative-prompt'), seed: int = typer.Option(42, '-seed'), steps: int = typer.Option(4, '-steps'),
     guidance: float = typer.Option(1.0, '-guidance'), lora_strength: float = typer.Option(1.0, '-lora-strength'), preset: str = typer.Option("low-vram", '-preset'),
-    backend: str = typer.Option("comfyui-gguf", '-backend'), text_encoder: str = typer.Option("q3", '-text-encoder'), expert_quant: str = typer.Option("q2", '-expert-quant'), adapter_device: str = typer.Option("cpu", '-adapter-device'), weight_storage: str = typer.Option("mmap", '-weight-storage'), inference_width: int = typer.Option(256, '-inference-width'),
+    backend: str = typer.Option("comfyui-gguf", '-backend'), text_encoder: Optional[str] = typer.Option(None, '-text-encoder'), expert_quant: Optional[str] = typer.Option(None, '-expert-quant'), adapter_device: str = typer.Option("cpu", '-adapter-device'), weight_storage: str = typer.Option("mmap", '-weight-storage'), inference_width: int = typer.Option(256, '-inference-width'),
     inference_height: int = typer.Option(256, '-inference-height'), frames: int = typer.Option(5, '-frames'), fps: float = typer.Option(8.0, '-fps'),
     pixel_width: int = typer.Option(128, '-pixel-width'), pixel_height: int = typer.Option(128, '-pixel-height'),
     palette_colors: Optional[int] = typer.Option(None, '-palette-colors'), palette_image: Optional[Path] = typer.Option(None, '-palette-image'), background: str = typer.Option("#ffffff", '-background'),
@@ -264,12 +384,23 @@ def animate(
     min_free_commit_gib: float = typer.Option(2.0, '-min-free-commit-gib', help='Minimum sampled free Windows commit in GiB (at least 1).'),
     min_free_physical_gib: float = typer.Option(2.0, '-min-free-physical-gib', help='Minimum sampled available physical RAM in GiB (at least 1).'),
     cache_dir: Optional[Path] = typer.Option(None, '-cache-dir'), offline: bool = typer.Option(False, '-offline', help="Explicit offline mode (inference is always offline)."),
+    config: Optional[Path] = typer.Option(None, '-config', help='Model configuration file.'), model: Optional[str] = typer.Option(None, '-model', help='Override the configured animation model.'),
     json_output: bool = typer.Option(False, '-json', help='Print JSON and save metadata files.'),
 ):
     """Animate with the experimental local Wan2.2 GGUF backend."""
     from .animation import AnimationSettings, run_animation, validate_animation_job
-    from . import models
+    from . import model_config, model_store
     try:
+        selected = model_config.select_model(model_config.load_config(config), 'animation', model)
+        if selected['backend'] == 'wan-i2v':
+            if text_encoder is not None and text_encoder != selected['text_encoder']:
+                raise ValueError('The requested text encoder conflicts with the selected animation model.')
+            if expert_quant is not None and expert_quant != selected['expert_quant']:
+                raise ValueError('The requested expert quantization conflicts with the selected animation model.')
+            text_encoder, expert_quant = selected['text_encoder'], selected['expert_quant']
+        else:
+            text_encoder, expert_quant = text_encoder or 'q3', expert_quant or 'q2'
+            selected = {**selected, 'text_encoder': text_encoder, 'expert_quant': expert_quant}
         settings = AnimationSettings(input_path=input, prompt=prompt, out=out, save_json=json_output, **_style_settings(style, palette), negative_prompt=negative_prompt,
                                      seed=seed, steps=steps, guidance=guidance, lora_strength=lora_strength, preset=preset, backend=backend, text_encoder=text_encoder, expert_quant=expert_quant, adapter_device=adapter_device, weight_storage=weight_storage,
                                      inference_width=inference_width, inference_height=inference_height, frames=frames, fps=fps,
@@ -277,10 +408,12 @@ def animate(
                                      background=background, mp4=mp4, overwrite=overwrite, max_private_gib=max_private_gib, ram_budget_gib=ram_budget_gib, vram_budget_gib=vram_budget_gib, device=device, timeout_seconds=timeout_seconds,
                                      min_free_commit_gib=min_free_commit_gib, min_free_physical_gib=min_free_physical_gib)
         validate_animation_job(settings)
-        profile = models.animation_profile(text_encoder, expert_quant)
-        paths = {key: models.model_path(key, cache_dir, profile=profile) for key in models.list_models(profile)}
+        paths, provenance = model_store.resolve(selected, cache_dir)
         typer.echo("Local Wan backend: memory requirements and output quality depend on the selected settings.", err=True)
-        result = run_animation(settings, paths, progress=lambda message: typer.echo(message, err=True))
+        if selected['backend'] == 'builtin-animation':
+            result = run_animation(settings, paths, progress=lambda message: typer.echo(message, err=True))
+        else:
+            result = run_animation(settings, paths, progress=lambda message: typer.echo(message, err=True), model_spec={**selected, 'provenance': provenance})
         if json_output:
             _output(result, True)
         else:

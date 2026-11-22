@@ -38,6 +38,20 @@ Animation is experimental and memory-intensive. A five-frame run completed on th
 
 Inference uses local model files. Once setup is complete, you can run without an internet connection; `-offline` makes that intent explicit. Add `-json` to print machine-readable results and save metadata alongside image outputs or in the animation directory. Existing outputs are protected by default; use a new path or pass `-overwrite` to replace them. Animation only replaces an existing directory if pixcli created it.
 
+### Models
+
+`pixcli.toml` selects the image generation, editing, and animation models. Its defaults are the pinned models installed by setup. To use a compatible Hugging Face or local model, add a named entry as shown in the [model guide](docs/models.md), then select it in the file or pass `-model NAME` for one command.
+
+```powershell
+pixcli models list
+pixcli models status
+pixcli models install my-model
+pixcli models verify -model my-model
+pixcli models uninstall my-model
+```
+
+Custom downloads use pixcli-managed storage. Uninstall leaves user-provided paths and the shared Hugging Face cache untouched. Image models must be compatible Diffusers pipelines; animation components must fit the existing Wan2.2 I2V workflow. A model with a different architecture needs a supported loader or backend.
+
 ## Palettes and styles
 
 Select a palette or style by name on `gen`, `edit`, or `animate`:
@@ -62,7 +76,7 @@ Generation, editing, and animation accept `-ram-budget-gib` and `-vram-budget-gi
 pixcli gen -prompt "pixel art, a knight" -out outputs/knight.png -ram-budget-gib 16 -vram-budget-gib 8
 ```
 
-On Windows, RAM budgets use working-set limits and sampled resident-memory checks. Animation accounts for the command and backend processes together. With the default storage setting, image jobs stream weights from disk when a RAM budget is set; animation uses mapped weights by default. Streaming can be slower, and active tensors and the operating system still need memory. Sampled checks can miss short peaks.
+On Windows, RAM budgets use working-set limits and sampled resident-memory checks. Animation accounts for the command and backend processes together. With the built-in image model, the default storage setting streams weights from disk when a RAM budget is set; animation uses mapped weights by default. Custom Diffusers models use resident loading. Streaming can be slower, and active tensors and the operating system still need memory. Sampled checks can miss short peaks.
 
 The VRAM budget limits PyTorch's CUDA allocator, not every GPU allocation. See the [image](docs/gen.md) and [animation](docs/animate.md) references for storage choices, memory guards, and budget limits.
 
@@ -75,7 +89,10 @@ The VRAM budget limits PyTorch's CUDA allocator, not every GPU allocation. See t
 | [`animate`](docs/animate.md) | Animate an image. |
 | [`doctor`](docs/doctor.md) | Check the environment, hardware, and model availability. |
 | [`models`](docs/models.md) | Manage model files. |
-| [`models list`](docs/models-list.md) | List pinned model files and revisions. |
+| [`models list`](docs/models-list.md) | List pinned model files and configured names. |
+| [`models status`](docs/models.md) | Check configured models and list managed installations. |
+| [`models install`](docs/models.md) | Install a configured model. |
+| [`models uninstall`](docs/models.md) | Remove a pixcli-managed installation. |
 | [`models download`](docs/models-download.md) | Download and verify a model profile. |
 | [`models verify`](docs/models-verify.md) | Check a model profile locally. |
 
@@ -101,6 +118,8 @@ pixcli doctor
 ```
 
 Setup installs the image environment and separate animation backend, then downloads and verifies both default model profiles. `doctor` reports hardware and model availability. If a download is interrupted, rerun setup to resume it.
+
+To configure and install other models without downloading the defaults, run `./setup.ps1 -SkipModels`, edit `pixcli.toml`, and install the names you selected with `pixcli models install NAME`.
 
 If a model requires access approval, accept its terms on Hugging Face and sign in with `.\.venv\Scripts\hf.exe auth login` or set `HF_TOKEN`, then rerun setup. Models are stored in the Hugging Face cache by default; set `HF_HUB_CACHE` before setup to change its location.
 

@@ -40,6 +40,8 @@ Animation is experimental. A five-frame run completed on the hardware described 
 | `-overwrite` | Off | Replace an existing output directory only if it was created by pixcli. |
 | `-timeout-seconds FLOAT` | None | Optional positive overall timeout. Backend startup has a separate 120-second limit. |
 | `-cache-dir PATH` | Hugging Face cache | Use a specific model cache. Use the same path as when downloading the models. |
+| `-config PATH` | `pixcli.toml` | Read model selections from this file. |
+| `-model NAME` | Configured animation default | Use a named compatible Wan model for this command. |
 | `-offline` | Off | Express offline intent. Animation inference always uses local model files. |
 | `-json` | Off | Print JSON output and save `metadata.json` and `sheet.json`, including sprite-sheet coordinates and timing. |
 | `-help` | — | Show command options. |

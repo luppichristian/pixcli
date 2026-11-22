@@ -1,4 +1,4 @@
-"""File-backed loading for the pinned scaled-FP8 Wan text encoder.
+"""File-backed loading for compatible scaled-FP8 Wan text encoders.
 
 The normal Comfy mixed-precision linear operations and scales are retained.
 Only the large FP16 embedding table is specialized: token rows are gathered
@@ -61,15 +61,13 @@ def mapped_fp16_embedding_type(base_embedding):
 
 
 def load_mapped_fp8_text(path, embedding_directory=None):
-    """Load the pinned FP8 encoder with Comfy's original quantization math."""
+    """Load a compatible FP8 encoder with Comfy's quantization math."""
     import comfy.ops
     import comfy.sd
     import comfy.utils
     from pixcli.mapped_safetensors import load_readonly_safetensors
 
     path = Path(path)
-    if path.name != 'umt5_xxl_fp8_e4m3fn_scaled.safetensors':
-        raise ValueError('Mapped FP8 text loading requires the pinned Wan text encoder')
     state, metadata = load_readonly_safetensors(path)
     shared = state.get('shared.weight')
     marker = state.get('scaled_fp8')

@@ -6,7 +6,7 @@ Download and verify the pinned files for a model profile from Hugging Face. The 
 pixcli models download [OPTIONS]
 ```
 
-The first download can require substantial disk space and an internet connection. Some models may require you to accept their terms and sign in to Hugging Face. The default image and animation profiles are already downloaded by `setup.ps1`.
+The first download can require substantial disk space and an internet connection. Some models may require you to accept their terms and sign in to Hugging Face. `setup.ps1` downloads the default image and animation profiles unless you pass `-SkipModels`.
 
 ## Options
 

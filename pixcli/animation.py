@@ -146,15 +146,25 @@ def validate_animation_job(s: AnimationSettings) -> None:
             raise FileExistsError(f'Refusing to replace a directory not created by pixcli: {out}')
 
 
-def run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[str], None] | None = None) -> dict:
+def run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[str], None] | None = None,
+                  model_spec: dict | None = None) -> dict:
     from .residency import resident_memory_limit
     with resident_memory_limit(s.ram_budget_gib) as limit_applied:
-        return _run_animation(s, model_paths, progress, limit_applied)
+        return _run_animation(s, model_paths, progress, limit_applied, model_spec)
 
 
 def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[str], None] | None,
-                   limit_applied: bool) -> dict:
+                   limit_applied: bool, model_spec: dict | None = None) -> dict:
     validate_animation_job(s)
+    custom_names = None
+    if model_spec is not None:
+        if (not isinstance(model_spec, dict) or model_spec.get('backend') != 'wan-i2v'
+                or not isinstance(model_spec.get('name'), str) or not model_spec['name'].strip()
+                or not isinstance(model_spec.get('provenance'), dict)):
+            raise ValueError('Custom animation model must have a name, wan-i2v backend, and provenance mapping')
+        custom_names = {key: Path(value).name for key, value in model_paths.items()}
+        from .comfy_backend import _animation_model_names
+        _animation_model_names(s.text_encoder, s.expert_quant, custom_names)
     fixed_palette = load_palette(s.palette) if s.palette is not None else None
     from .comfy_backend import (_check_sampled_budgets, _process_tree_resident_bytes,
                                 _free_commit_bytes, memory_guard_violation)
@@ -183,7 +193,8 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
                               ram_budget_gib=s.ram_budget_gib, vram_budget_gib=s.vram_budget_gib,
                               device=s.device,
                               timeout_seconds=s.timeout_seconds,
-                              progress=progress)
+                              progress=progress,
+                              **({'custom_names': custom_names} if custom_names is not None else {}))
     audit['command_residency_limit_applied'] = limit_applied
     guard()
     palette = None
@@ -200,11 +211,19 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
     result = export_animation(frames, s.out, final_size=(s.pixel_width, s.pixel_height), fps=s.fps,
                               palette_colors=s.palette_colors, palette_image=palette, fixed_palette=fixed_palette, background=ImageColor.getrgb(s.background),
                               overwrite=s.overwrite, mp4=s.mp4, save_json=s.save_json, memory_guard=guard)
-    from .models import animation_profile, list_models
-    profile = animation_profile(s.text_encoder, s.expert_quant)
-    models = {key: {'repo_id': value['repo_id'], 'revision': value['revision'],
-                    'files': [item['filename'] for item in value['files']]}
-              for key, value in list_models(profile).items()}
+    if model_spec is None:
+        from .models import animation_profile, list_models
+        profile = animation_profile(s.text_encoder, s.expert_quant)
+        models = {key: {'repo_id': value['repo_id'], 'revision': value['revision'],
+                        'files': [item['filename'] for item in value['files']]}
+                  for key, value in list_models(profile).items()}
+        quantization = f"GGUF {'Q2_K' if s.expert_quant == 'q2' else 'Q3_K_S'} experts; {'Q3_K_S' if s.text_encoder == 'q3' else 'FP8'} text"
+    else:
+        profile = model_spec['name']
+        provenance = model_spec['provenance']
+        models = provenance.get('sources', provenance)
+        # The loader type is known, but a custom file's quantization is not.
+        quantization = None
     versions = {}
     for package in ('torch', 'Pillow', 'psutil', 'imageio', 'imageio-ffmpeg'):
         try:
@@ -213,7 +232,8 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
             versions[package] = None
     graph = build_graph('source.png', styled_prompt(s.prompt, s.style_prompt), s.negative_prompt, s.seed, s.inference_width,
                         s.inference_height, s.frames, s.guidance, s.lora_strength, text_encoder=s.text_encoder,
-                        expert_quant=s.expert_quant, adapter_device=s.adapter_device, weight_storage=s.weight_storage)
+                        expert_quant=s.expert_quant, adapter_device=s.adapter_device, weight_storage=s.weight_storage,
+                        custom_names=custom_names)
     high, low = graph['high_sample']['inputs'], graph['low_sample']['inputs']
     workflow = {'sampler': high['sampler_name'], 'scheduler': high['scheduler'],
                 'shift': graph['high_sampling']['inputs']['shift'], 'steps': high['steps'],
@@ -225,7 +245,7 @@ def _run_animation(s: AnimationSettings, model_paths: dict, progress: Callable[[
                 'input_sha256': sha.hexdigest(), 'palette_sha256': palette_sha256, 'fixed_palette': fixed_palette, 'models': models, 'backend': s.backend,
                 'model_profile': profile,
                 'runtime': audit, 'dependency_versions': versions, 'precision': 'mixed',
-                'quantization': f"GGUF {'Q2_K' if s.expert_quant == 'q2' else 'Q3_K_S'} experts; {'Q3_K_S' if s.text_encoder == 'q3' else 'FP8'} text",
+                'quantization': quantization,
                 'workflow': workflow,
                 'inference_dimensions': [s.inference_width, s.inference_height], 'final_dimensions': [s.pixel_width, s.pixel_height],
                 'processing': ['aspect-preserving nearest-neighbor fit and letterbox', 'shared sequence transform and GIF palette', 'playback loop only'],

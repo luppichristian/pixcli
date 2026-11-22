@@ -19,10 +19,23 @@ from .fp8_text import PixcliMappedFP8UMT5Loader
 @functools.lru_cache(maxsize=1)
 def _load(path, adapter_device, weight_storage='normal'):
     if weight_storage == 'mmap' and adapter_device == 'cpu':
-        if Path(path).name != 'wan2.2_animate_adapter_model.safetensors':
-            raise ValueError('Mapped pixel loading requires the pinned pixel adapter')
         from pixcli.mapped_safetensors import load_readonly_safetensors
         tensors, _ = load_readonly_safetensors(path)
+        if Path(path).name != 'wan2.2_animate_adapter_model.safetensors':
+            # Renamed adapters must have the same complete schema before use.
+            # The node below still checks every pair against the actual model.
+            a_suffix, b_suffix = '.lora_A.weight', '.lora_B.weight'
+            prefixes = {key[:-len(a_suffix)] for key in tensors if key.endswith(a_suffix)}
+            expected = {prefix + suffix for prefix in prefixes for suffix in (a_suffix, b_suffix)}
+            if len(prefixes) != 400 or set(tensors) != expected:
+                raise ValueError('Mapped pixel loading requires the pinned pixel adapter or a compatible adapter schema')
+            for prefix in prefixes:
+                a, b = tensors[prefix + a_suffix], tensors[prefix + b_suffix]
+                a_shape, b_shape = tuple(getattr(a, 'shape', ())), tuple(getattr(b, 'shape', ()))
+                if (getattr(a, 'dtype', None) != torch.bfloat16 or getattr(b, 'dtype', None) != torch.bfloat16
+                        or len(a_shape) != 2 or len(b_shape) != 2 or b_shape[1] != a_shape[0]
+                        or any(dim <= 0 for dim in a_shape + b_shape)):
+                    raise ValueError('Unexpected tensor shape or dtype in mapped pixel adapter')
         return tensors
     return comfy.utils.load_torch_file(path, safe_load=True, device=torch.device(adapter_device))
 
@@ -31,8 +44,6 @@ def _load(path, adapter_device, weight_storage='normal'):
 def _load_distill(path):
     allowed = {f'wan2.2_i2v_lightx2v_4steps_lora_v1_{expert}_noise.safetensors'
                for expert in ('high', 'low')}
-    if Path(path).name not in allowed:
-        raise ValueError('Mapped distillation loading requires a pinned distillation adapter')
     from pixcli.mapped_safetensors import load_readonly_safetensors
     tensors, metadata = load_readonly_safetensors(path)
     suffixes = ('.lora_up.weight', '.lora_down.weight', '.alpha')
@@ -44,6 +55,12 @@ def _load_distill(path):
         expected_dtype = torch.int64 if key.endswith('.alpha') else torch.float32
         if tensor.dtype != expected_dtype:
             raise ValueError(f'Unexpected tensor dtype in pinned distillation adapter: {key}')
+    if Path(path).name not in allowed:
+        for prefix in prefixes:
+            up = tuple(getattr(tensors[prefix + '.lora_up.weight'], 'shape', ()))
+            down = tuple(getattr(tensors[prefix + '.lora_down.weight'], 'shape', ()))
+            if len(up) != 2 or len(down) != 2 or up[1] != down[0] or any(dim <= 0 for dim in up + down):
+                raise ValueError(f'Unexpected tensor shape in mapped distillation adapter: {prefix}')
     return tensors, metadata
 
 

@@ -397,13 +397,10 @@ def _expert_choice(expert_quant: str) -> tuple[str, str, str]:
         raise ValueError('Unsupported expert quantization; choose q3 or q2') from exc
 
 
-def validate_model_locations(paths: dict, *, text_encoder: str = 'fp8', expert_quant: str = 'q3') -> None:
-    """Reject same-name files in another selected directory in the same category."""
-    from pathlib import Path
+def _animation_model_names(text_encoder: str, expert_quant: str, custom_names: dict | None = None) -> dict:
+    """Resolve the seven graph filenames without changing the selected loader types."""
     text_key, text_filename = _text_encoder_choice(text_encoder)
     high_key, low_key, suffix = _expert_choice(expert_quant)
-    groups = ((high_key, low_key), (text_key,), ('wan_vae',),
-              ('wan_distill_high', 'wan_distill_low', 'wan_pixel'))
     names = {
         high_key: f'wan2.2_i2v_high_noise_14B_{suffix}.gguf',
         low_key: f'wan2.2_i2v_low_noise_14B_{suffix}.gguf',
@@ -413,7 +410,37 @@ def validate_model_locations(paths: dict, *, text_encoder: str = 'fp8', expert_q
         'wan_distill_low': 'wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors',
         'wan_pixel': 'wan2.2_animate_adapter_model.safetensors',
     }
+    if custom_names is None:
+        return names
+    if not isinstance(custom_names, dict):
+        raise ValueError('Custom animation filenames must be a role-to-filename mapping')
+    missing = set(names) - set(custom_names)
+    extra = set(custom_names) - set(names)
+    if missing or extra:
+        raise ValueError(f'Custom animation filenames have missing roles {sorted(missing)} and unexpected roles {sorted(extra)}')
+    for key, name in custom_names.items():
+        if (not isinstance(name, str) or not name or name in ('.', '..')
+                or any(char in name for char in '/\\:') or any(ord(char) < 32 for char in name)):
+            raise ValueError(f'Invalid animation model filename for {key}: {name!r}')
+        expected_suffix = '.gguf' if key in (high_key, low_key) or (key == text_key and text_encoder == 'q3') else '.safetensors'
+        if not name.lower().endswith(expected_suffix):
+            raise ValueError(f'Animation model {key} must use a {expected_suffix} file')
+    return dict(custom_names)
+
+
+def validate_model_locations(paths: dict, *, text_encoder: str = 'fp8', expert_quant: str = 'q3',
+                             custom_names: dict | None = None) -> None:
+    """Reject ambiguous names or files shadowed in a selected model category."""
+    from pathlib import Path
+    text_key, _ = _text_encoder_choice(text_encoder)
+    high_key, low_key, _ = _expert_choice(expert_quant)
+    groups = ((high_key, low_key), (text_key,), ('wan_vae',),
+              ('wan_distill_high', 'wan_distill_low', 'wan_pixel'))
+    names = _animation_model_names(text_encoder, expert_quant, custom_names)
     for group in groups:
+        folded = [names[key].casefold() for key in group]
+        if len(folded) != len(set(folded)):
+            raise ValueError(f'Duplicate model filenames are ambiguous in category {group}')
         folders = {Path(paths[key]).parent.resolve() for key in group}
         for key in group:
             path = Path(paths[key])
@@ -449,10 +476,13 @@ def validate_ready(marker, lock, node, commits: dict, *, mmap_node=None, chunked
 
 def build_graph(image_name: str, prompt: str, negative: str, seed: int,
                 width: int, height: int, frames: int, guidance: float, lora_strength: float = 1.0,
-                text_encoder: str = 'fp8', expert_quant: str = 'q3', adapter_device: str = 'cpu', weight_storage: str = 'normal') -> dict:
+                text_encoder: str = 'fp8', expert_quant: str = 'q3', adapter_device: str = 'cpu', weight_storage: str = 'normal',
+                custom_names: dict | None = None) -> dict:
     validate_animation(width, height, frames)
-    _, text_filename = _text_encoder_choice(text_encoder)
-    _, _, expert_suffix = _expert_choice(expert_quant)
+    text_key, _ = _text_encoder_choice(text_encoder)
+    high_key, low_key, _ = _expert_choice(expert_quant)
+    names = _animation_model_names(text_encoder, expert_quant, custom_names)
+    text_filename = names[text_key]
     if adapter_device not in ('cpu', 'cuda'):
         raise ValueError('Unsupported adapter device; choose cpu or cuda')
     if weight_storage not in ('normal', 'mmap'):
@@ -469,17 +499,17 @@ def build_graph(image_name: str, prompt: str, negative: str, seed: int,
                  else node('PixcliMappedUMT5Loader' if weight_storage == 'mmap' else 'CLIPLoaderGGUF', clip_name=text_filename, type='wan')),
         'positive': node('CLIPTextEncode', clip=['text', 0], text=prompt),
         'negative': node('CLIPTextEncode', clip=['text', 0], text=negative),
-        'vae': node('VAELoader', vae_name='wan_2.1_vae.safetensors'),
+        'vae': node('VAELoader', vae_name=names['wan_vae']),
         'condition': node('PainterI2V', positive=['positive', 0], negative=['negative', 0],
                           vae=['vae', 0], width=width, height=height, length=frames, batch_size=1,
                           motion_amplitude=1.1, start_image=['image', 0]),
     }
     for expert in ('high', 'low'):
-        result[expert + '_model'] = node('PixcliMappedGGUFLoader' if weight_storage == 'mmap' else 'UnetLoaderGGUF', unet_name=f'wan2.2_i2v_{expert}_noise_14B_{expert_suffix}.gguf')
+        result[expert + '_model'] = node('PixcliMappedGGUFLoader' if weight_storage == 'mmap' else 'UnetLoaderGGUF', unet_name=names[high_key if expert == 'high' else low_key])
         result[expert + '_distill'] = node('PixcliMappedDistillLoRA' if weight_storage == 'mmap' else 'LoraLoaderModelOnly', model=[expert + '_model', 0],
-                                           lora_name=f'wan2.2_i2v_lightx2v_4steps_lora_v1_{expert}_noise.safetensors', strength_model=1.0)
+                                           lora_name=names['wan_distill_' + expert], strength_model=1.0)
         result[expert + '_pixel'] = node('PixcliCheckedPixelLoRA', model=[expert + '_distill', 0],
-                                         lora_name='wan2.2_animate_adapter_model.safetensors', strength=lora_strength, expert=expert,
+                                         lora_name=names['wan_pixel'], strength=lora_strength, expert=expert,
                                          adapter_device=adapter_device, weight_storage=weight_storage)
         result[expert + '_sampling'] = node('ModelSamplingSD3', model=[expert + '_pixel', 0], shift=5.0)
     common = dict(noise_seed=seed, steps=4, cfg=guidance, sampler_name='ddim', scheduler='simple',
@@ -519,7 +549,7 @@ def run_comfy(image_path, prompt: str, negative: str, seed: int, width: int, hei
               backend_dir=None, background=(255, 255, 255), lora_strength=1.0,
               timeout_seconds=None, max_private_gib=None, min_free_commit_gib=2.0, min_free_physical_gib=2.0,
               progress=None, text_encoder='fp8', expert_quant='q3', preset='low-vram', adapter_device='cpu', weight_storage='normal',
-              ram_budget_gib=None, vram_budget_gib=None, device='auto'):
+              ram_budget_gib=None, vram_budget_gib=None, device='auto', custom_names=None):
     """Run the experimental pinned local ComfyUI graph; return frames and audit.
 
     It uses a fresh localhost-only process and temporary directories. The resource
@@ -552,7 +582,7 @@ def run_comfy(image_path, prompt: str, negative: str, seed: int, width: int, hei
         raise ValueError('VRAM memory budget requires the low-vram preset')
     if adapter_device == 'cuda' and preset != 'gpu-resident':
         raise ValueError('CUDA adapter device requires the gpu-resident preset')
-    graph = build_graph('source.png', prompt, negative, seed, width, height, frames, guidance, lora_strength, text_encoder, expert_quant, adapter_device, weight_storage)
+    graph = build_graph('source.png', prompt, negative, seed, width, height, frames, guidance, lora_strength, text_encoder, expert_quant, adapter_device, weight_storage, custom_names)
     text_key, _ = _text_encoder_choice(text_encoder)
     high_key, low_key, _ = _expert_choice(expert_quant)
     if timeout_seconds is not None:
@@ -564,8 +594,10 @@ def run_comfy(image_path, prompt: str, negative: str, seed: int, width: int, hei
     if missing:
         from .models import animation_profile
         profile = animation_profile(text_encoder, expert_quant)
+        if custom_names is not None:
+            raise FileNotFoundError(f'Missing configured animation models: {missing}; install or repair the selected model.')
         raise FileNotFoundError(f'Missing animation models: {missing}. Run pixcli models download -profile {profile}')
-    validate_model_locations(model_paths, text_encoder=text_encoder, expert_quant=expert_quant)
+    validate_model_locations(model_paths, text_encoder=text_encoder, expert_quant=expert_quant, custom_names=custom_names)
     _validate_animation_headroom(psutil.virtual_memory().available, _free_commit_bytes(),
                                  min_free_commit_gib, min_free_physical_gib, weight_storage)
     root = Path(backend_dir or Path(__file__).resolve().parent.parent / '.backend')

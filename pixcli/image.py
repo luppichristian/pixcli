@@ -1,10 +1,11 @@
-"""Local SDXL + Pixel Art XL image inference and image job output."""
+"""Local image inference and image job output."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import gc
 import hashlib
 from importlib.metadata import PackageNotFoundError, version
+import inspect
 import json
 import math
 import os
@@ -204,18 +205,25 @@ def _memory_status() -> dict[str, int | None]:
 
 def _memory_preflight(model_paths: dict[str, Path], *, streaming: bool = False,
                       min_free_commit_gib: float = 2.0,
-                      min_free_physical_gib: float = 2.0) -> dict[str, int | None]:
+                      min_free_physical_gib: float = 2.0,
+                      model_spec: dict[str, Any] | None = None) -> dict[str, int | None]:
     """Check requested reserves and, for resident loading, estimated overhead."""
-    from .models import list_models
     seen: set[Path] = set()
-    for key, model in list_models('image').items():
-        for item in model['files']:
-            if not item['filename'].endswith('.safetensors'):
-                continue
-            path = Path(model_paths[key]) if key == 'lora' else Path(model_paths[key]) / item['filename']
-            if not path.is_file():
-                raise RuntimeError(f'Missing selected {key} checkpoint {path}. Run pixcli models verify.')
-            seen.add(path.resolve())
+    if model_spec is not None:
+        snapshot = Path(model_paths['base'])
+        seen = {path.resolve() for path in snapshot.rglob('*.safetensors') if path.is_file()}
+        if not seen:
+            raise RuntimeError(f'No safetensors checkpoints found in custom model directory {snapshot}.')
+    else:
+        from .models import list_models
+        for key, model in list_models('image').items():
+            for item in model['files']:
+                if not item['filename'].endswith('.safetensors'):
+                    continue
+                path = Path(model_paths[key]) if key == 'lora' else Path(model_paths[key]) / item['filename']
+                if not path.is_file():
+                    raise RuntimeError(f'Missing selected {key} checkpoint {path}. Run pixcli models verify.')
+                seen.add(path.resolve())
     weights = sum(path.stat().st_size for path in seen)
     commit_reserve = int(min_free_commit_gib * 1024**3)
     physical_reserve = int(min_free_physical_gib * 1024**3)
@@ -224,10 +232,10 @@ def _memory_preflight(model_paths: dict[str, Path], *, streaming: bool = False,
     status = _memory_status()
     commit = status['commit_available']
     if commit is not None and commit < required_commit:
-        raise RuntimeError(f'Insufficient Windows commit headroom for SDXL: {commit / 1024**3:.1f} GiB available; estimated {required_commit / 1024**3:.1f} GiB needed. Close memory-heavy applications or increase the Windows page-file limit, then retry; no model was loaded.')
+        raise RuntimeError(f'Insufficient Windows commit headroom for the image model: {commit / 1024**3:.1f} GiB available; estimated {required_commit / 1024**3:.1f} GiB needed. Close memory-heavy applications or increase the Windows page-file limit, then retry; no model was loaded.')
     physical = status['physical_available']
     if physical is not None and physical < required_physical:
-        raise RuntimeError(f'Insufficient available physical RAM for SDXL: {physical / 1024**3:.1f} GiB available; estimated at least {required_physical / 1024**3:g} GiB needed. Close memory-heavy applications and retry; no model was loaded.')
+        raise RuntimeError(f'Insufficient available physical RAM for the image model: {physical / 1024**3:.1f} GiB available; estimated at least {required_physical / 1024**3:g} GiB needed. Close memory-heavy applications and retry; no model was loaded.')
     return {**status, 'checkpoint_bytes': weights, 'estimated_commit_needed': required_commit, 'estimated_physical_needed': required_physical}
 
 
@@ -328,8 +336,9 @@ def _process_memory_peaks() -> dict[str, int | None]:
             'peak_commit_bytes': getattr(memory, 'peak_pagefile', None)}
 
 
-def _infer(s: ImageSettings, model_paths: dict[str, Path], image: Image.Image | None) -> tuple[Image.Image, dict[str, Any]]:
-    """Run SDXL with offline flags scoped to this inference call."""
+def _infer(s: ImageSettings, model_paths: dict[str, Path], image: Image.Image | None,
+           model_spec: dict[str, Any] | None = None) -> tuple[Image.Image, dict[str, Any]]:
+    """Run image inference with offline flags scoped to this inference call."""
     keys = ('HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE')
     previous = {key: os.environ.get(key) for key in keys}
     try:
@@ -337,7 +346,10 @@ def _infer(s: ImageSettings, model_paths: dict[str, Path], image: Image.Image | 
             os.environ[key] = '1'
         from .residency import resident_memory_limit
         with resident_memory_limit(s.ram_budget_gib) as hard_ram_limit_applied:
-            return _infer_offline(s, model_paths, image, hard_ram_limit_applied=hard_ram_limit_applied)
+            if model_spec is None:
+                return _infer_offline(s, model_paths, image, hard_ram_limit_applied=hard_ram_limit_applied)
+            return _infer_offline(s, model_paths, image, hard_ram_limit_applied=hard_ram_limit_applied,
+                                  model_spec=model_spec)
     finally:
         for key, value in previous.items():
             if value is None:
@@ -346,11 +358,24 @@ def _infer(s: ImageSettings, model_paths: dict[str, Path], image: Image.Image | 
                 os.environ[key] = value
 
 
-def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.Image | None, *, hard_ram_limit_applied: bool = False) -> tuple[Image.Image, dict[str, Any]]:
-    """Run one SDXL job from local snapshots, using CPU model offload."""
+def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.Image | None, *,
+                   hard_ram_limit_applied: bool = False,
+                   model_spec: dict[str, Any] | None = None) -> tuple[Image.Image, dict[str, Any]]:
+    """Run one image job from local snapshots, using CPU model offload."""
+    if model_spec is not None:
+        if model_spec.get('backend') != 'diffusers':
+            raise ValueError('Custom image models require the diffusers backend.')
+        if s.weight_storage == 'disk':
+            raise ValueError('Disk streaming is not supported for custom Diffusers models; choose memory or auto.')
+        if s.lora_strength != 1.0:
+            raise ValueError('Custom Diffusers models do not use the built-in pixel LoRA; '
+                             'remove the LoRA strength setting.')
     try:
         import torch
-        from diffusers import AutoencoderKL, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline
+        if model_spec is None:
+            from diffusers import AutoencoderKL, StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline
+        else:
+            from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
     except ImportError as exc:
         raise RuntimeError('Image dependencies missing; run the project setup script.') from exc
     cuda_available = torch.cuda.is_available()
@@ -359,13 +384,16 @@ def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.
     device = 'cuda' if s.device == 'cuda' or (s.device == 'auto' and cuda_available) else 'cpu'
     if device == 'cpu' and s.vram_budget_gib is not None:
         raise ValueError('VRAM budget requires a CUDA device')
-    for key in ('base', 'vae', 'lora'):
+    for key in (('base', 'vae', 'lora') if model_spec is None else ('base',)):
         if key not in model_paths or not Path(model_paths[key]).exists():
             raise RuntimeError(f'Missing local {key} model. Run pixcli models download -profile image.')
-    weight_storage = _image_weight_storage(s, device)
-    memory = _memory_preflight(model_paths, streaming=weight_storage == 'disk',
-                               min_free_commit_gib=s.min_free_commit_gib,
-                               min_free_physical_gib=s.min_free_physical_gib)
+    weight_storage = _image_weight_storage(s, device) if model_spec is None else 'memory'
+    memory_kwargs = {'streaming': weight_storage == 'disk',
+                     'min_free_commit_gib': s.min_free_commit_gib,
+                     'min_free_physical_gib': s.min_free_physical_gib}
+    if model_spec is not None:
+        memory_kwargs['model_spec'] = model_spec
+    memory = _memory_preflight(model_paths, **memory_kwargs)
     guard = _ImageMemoryGuard(s.ram_budget_gib, s.min_free_commit_gib, s.min_free_physical_gib)
     pipe = None
     vae = None
@@ -379,7 +407,23 @@ def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.
             previous_cuda_fraction = _set_cuda_budget(torch.cuda, s.vram_budget_gib)
         guard.sample()
         dtype = torch.float16 if device == 'cuda' else torch.float32
-        if weight_storage == 'disk':
+        if model_spec is not None:
+            cls = AutoPipelineForImage2Image if image is not None else AutoPipelineForText2Image
+            load_kwargs = {'torch_dtype': dtype, 'local_files_only': True,
+                           'use_safetensors': True, 'low_cpu_mem_usage': True}
+            if model_spec.get('variant') is not None:
+                load_kwargs['variant'] = model_spec['variant']
+            try:
+                pipe = cls.from_pretrained(str(model_paths['base']), **load_kwargs)
+            except (torch.cuda.OutOfMemoryError, MemoryError):
+                raise
+            except Exception as exc:
+                operation = 'editing' if image is not None else 'generation'
+                raise RuntimeError(f'Could not load custom model {model_spec.get("name", "")!r} '
+                                   f'for {operation} with Diffusers: {exc}') from exc
+            coverage = None
+            guard.sample()
+        elif weight_storage == 'disk':
             from .image_stream import load_streamed_pipeline
             pipe, coverage = load_streamed_pipeline(model_paths, img2img=image is not None, strength=s.lora_strength,
                                                      device=device, dtype=dtype, guard=guard)
@@ -397,8 +441,14 @@ def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.
                 raise RuntimeError('Pixel Art XL adapter did not activate; refusing to generate without it.')
             coverage = _assert_lora_coverage(pipe, adapter)
             guard.sample()
-        pipe.enable_vae_slicing()
-        pipe.enable_vae_tiling()
+        if model_spec is None:
+            pipe.enable_vae_slicing()
+            pipe.enable_vae_tiling()
+        else:
+            for name in ('enable_vae_slicing', 'enable_vae_tiling'):
+                method = getattr(pipe, name, None)
+                if callable(method):
+                    method()
         if weight_storage != 'disk':
             if device == 'cpu':
                 pipe.to('cpu')
@@ -413,15 +463,40 @@ def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.
             args.update(width=s.inference_width, height=s.inference_height)
         else:
             args.update(image=image, strength=s.strength)
+        if model_spec is not None:
+            parameters = inspect.signature(pipe.__call__).parameters
+            for option, label in (('guidance_scale', 'guidance'), ('strength', 'edit strength')):
+                if (option != 'strength' or image is not None) and option not in parameters:
+                    raise ValueError(f'Custom model {model_spec.get("name", "")!r} does not support {label}.')
+            if 'negative_prompt' not in parameters:
+                if s.negative_prompt:
+                    raise ValueError(f'Custom model {model_spec.get("name", "")!r} does not support negative prompts.')
+                args.pop('negative_prompt')
+            if 'callback_on_step_end' not in parameters:
+                if 'callback' not in parameters:
+                    raise RuntimeError('Custom model does not support the per-step callback required for memory checks.')
+                args.pop('callback_on_step_end')
+                def sample_legacy_callback(step: int, timestep: Any, latents: Any) -> None:
+                    guard.sample()
+                args['callback'] = sample_legacy_callback
+                if 'callback_steps' in parameters:
+                    args['callback_steps'] = 1
         with torch.inference_mode():
-            output = pipe(**args).images[0]
+            try:
+                output = pipe(**args).images[0]
+            except TypeError as exc:
+                if model_spec is None:
+                    raise
+                operation = 'editing' if image is not None else 'generation'
+                raise RuntimeError(f'Custom model {model_spec.get("name", "")!r} does not support '
+                                   f'the required {operation} inputs: {exc}') from exc
         guard.sample()
         return output, {'peak_cuda_allocated_bytes': torch.cuda.max_memory_allocated() if device == 'cuda' else None,
                         'peak_cuda_reserved_bytes': torch.cuda.max_memory_reserved() if device == 'cuda' else None,
                         'gpu_name': torch.cuda.get_device_name() if device == 'cuda' else None, 'device': device,
                         'hard_ram_limit_applied': hard_ram_limit_applied, 'precision': 'float16' if device == 'cuda' else 'float32',
                         'scheduler': type(pipe.scheduler).__name__, 'scheduler_config': dict(pipe.scheduler.config),
-                        'quantization': None, 'memory_mode': memory_mode, 'adapter_active': True,
+                        'quantization': None, 'memory_mode': memory_mode, 'adapter_active': model_spec is None,
                         'adapter_coverage': coverage, 'memory_preflight': memory,
                         'minimum_sampled_physical_available_bytes': guard.minimum_physical,
                         'minimum_sampled_commit_available_bytes': guard.minimum_commit,
@@ -453,18 +528,20 @@ def _infer_offline(s: ImageSettings, model_paths: dict[str, Path], image: Image.
         raise RuntimeError(oom_error) from None
 
 
-def run_image(s: ImageSettings, model_paths: dict[str, Path]) -> dict[str, Any]:
+def run_image(s: ImageSettings, model_paths: dict[str, Path],
+              model_spec: dict[str, Any] | None = None) -> dict[str, Any]:
     """Write a PNG and requested optional files. Returns metadata.
 
-    Model paths must be local pinned base and VAE snapshot directories and the
-    local adapter safetensors file, under keys ``base``, ``vae``, and ``lora``.
+    By default, paths select the pinned base and VAE snapshots and adapter file.
+    With a custom Diffusers model specification, ``base`` is a local snapshot.
     """
     from .residency import resident_memory_limit
     with resident_memory_limit(s.ram_budget_gib):
-        return _run_image_scoped(s, model_paths)
+        return _run_image_scoped(s, model_paths, model_spec)
 
 
-def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path]) -> dict[str, Any]:
+def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path],
+                      model_spec: dict[str, Any] | None = None) -> dict[str, Any]:
     validate_image(s)
     fixed_palette = load_palette(s.palette) if s.palette is not None else None
     job_guard = _ImageMemoryGuard(s.ram_budget_gib, s.min_free_commit_gib, s.min_free_physical_gib)
@@ -492,7 +569,10 @@ def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path]) -> dict[st
     if job_guard:
         job_guard.sample()
     started = time.perf_counter()
-    generated, runtime = _infer(s, model_paths, inference_input)
+    if model_spec is None:
+        generated, runtime = _infer(s, model_paths, inference_input)
+    else:
+        generated, runtime = _infer(s, model_paths, inference_input, model_spec)
     if job_guard:
         job_guard.sample()
     if source is None:
@@ -517,7 +597,6 @@ def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path]) -> dict[st
         processing.append(f'nearest-neighbor preview scaled {s.preview_scale}x')
     if job_guard:
         job_guard.sample()
-    from .models import list_models
     versions = {}
     for name in ('torch', 'diffusers', 'transformers', 'accelerate', 'peft', 'Pillow', 'huggingface-hub', 'safetensors'):
         try:
@@ -525,7 +604,14 @@ def _run_image_scoped(s: ImageSettings, model_paths: dict[str, Path]) -> dict[st
         except PackageNotFoundError:
             versions[name] = None
     settings = {k: str(v) if isinstance(v, Path) else v for k, v in asdict(s).items()}
-    models = {key: {'repo_id': data['repo_id'], 'revision': data['revision']} for key, data in list_models('image').items()}
+    if model_spec is None:
+        from .models import list_models
+        models = {key: {'repo_id': data['repo_id'], 'revision': data['revision']} for key, data in list_models('image').items()}
+    else:
+        models = {'base': {**model_spec.get('provenance', {}),
+                           'name': model_spec['name'], 'backend': model_spec['backend']}}
+        if model_spec.get('variant') is not None:
+            models['base']['variant'] = model_spec['variant']
     metadata = {'schema_version': 1, 'operation': 'edit' if source else 'gen', 'settings': settings, 'offline': True,
                 'input_hashes': input_hashes, 'models': models, 'backend': 'diffusers', 'runtime': runtime,
                 'dependency_versions': versions, 'inference_dimensions': [s.inference_width, s.inference_height],

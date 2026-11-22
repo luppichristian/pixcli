@@ -1,5 +1,9 @@
 # Project maintenance notes
 
+## Model configuration
+
+`pixcli.toml` selects named models; see `docs/models.md` for sources and management. Preserve pinned defaults, offline inference, memory safeguards, and coverage checks for both Wan experts. Custom local assets and the shared Hub cache are not owned by pixcli.
+
 ## Animation backend dependency lock
 
 `backend/requirements.lock` pins the Windows CPython 3.11 dependencies for the ComfyUI animation backend. It includes PyTorch and torchvision CUDA 13.0 wheels; the image environment uses a separate CUDA 12.8 PyTorch wheel. Backend source revisions and installation are in `scripts/setup-animation.ps1`.
